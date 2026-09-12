@@ -1,8 +1,26 @@
 # Publishing
 
-Stable release workflow iki şekilde çalışır:
+Chartshunter Media Studio Stable sürümleri GitHub Actions ile otomatik paketlenir.
 
-1. GitHub Actions > Build Windows Stable Release > Run workflow: EXE + ZIP artifact üretir.
-2. `v40` gibi bir tag push edildiğinde aynı paketleri GitHub Release olarak yayımlar.
+## v40 düzeni
 
-Yeni stable sürüm için `BUILD_INFO.json`, `CHANGELOG.md` ve uygulama sürümünü güncelle; ardından tag oluştur.
+`.github/workflows/release.yml`:
+
+1. Python kaynaklarını syntax/compile kontrolünden geçirir.
+2. Go tabanlı Windows GUI launcher'larını derler.
+3. Windows dağıtım klasörünü hazırlar.
+4. SHA256 doğrulama dosyasını üretir.
+5. ZIP paketini oluşturur.
+6. Workflow artifact'ını yükler.
+7. `v40` GitHub Release'ını oluşturur veya mevcut asset'leri günceller.
+
+Release asset'leri:
+
+- `ChartshunterMediaStudio_v40_Stable.zip`
+- `Chartshunter.Media.Studio.exe`
+- `Repair.Update.exe`
+- `SHA256SUMS.txt`
+
+## Sonraki stable sürüm
+
+Yeni stable sürümde uygulama sürümü, `BUILD_INFO.json`, `CHANGELOG.md` ve workflow içindeki release/tag adları birlikte güncellenmelidir. Kaynak değişiklikleri önce test edilmeli; stable tag/release yalnız doğrulama tamamlandıktan sonra yayınlanmalıdır.
