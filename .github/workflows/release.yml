@@ -28,24 +28,7 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path "bootstrap\source_bundle.part00.b64") {
-            @'
-import base64, glob, io, lzma, tarfile
-from pathlib import Path
-
-parts = sorted(glob.glob("bootstrap/source_bundle.part*.b64"))
-if len(parts) != 9:
-    raise SystemExit(f"Expected 9 source parts, found {len(parts)}")
-
-data = "".join(Path(p).read_text(encoding="utf-8").strip() for p in parts)
-archive = lzma.decompress(base64.b64decode(data))
-
-with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tf:
-    tf.extractall(".")
-
-print(f"Restored {len(parts)} source bundle parts.")
-'@ | Set-Content restore_bundle.py -Encoding UTF8
-            python restore_bundle.py
-            Remove-Item restore_bundle.py
+            python -c "import base64,glob,io,lzma,tarfile,pathlib; parts=sorted(glob.glob('bootstrap/source_bundle.part*.b64')); assert len(parts)==9, f'Expected 9 parts, found {len(parts)}'; data=''.join(pathlib.Path(p).read_text(encoding='utf-8').strip() for p in parts); raw=lzma.decompress(base64.b64decode(data)); tf=tarfile.open(fileobj=io.BytesIO(raw),mode='r:'); tf.extractall('.'); tf.close(); print(f'Restored {len(parts)} source parts')"
           }
 
       - name: Verify Python source
@@ -94,11 +77,7 @@ print(f"Restored {len(parts)} source bundle parts.")
           Copy-Item docs\TEST_RAPORU_v40.txt $dst
           Copy-Item BUILD_INFO.json $dst
           Copy-Item chrome_capture_extension "$dst\chrome_capture_extension" -Recurse
-
-          Get-FileHash "$dst\Chartshunter Media Studio.exe", "$dst\Repair & Update.exe" -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
-            Set-Content "$dst\SHA256SUMS.txt"
-
+          Get-FileHash "$dst\Chartshunter Media Studio.exe", "$dst\Repair & Update.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } | Set-Content "$dst\SHA256SUMS.txt"
           Compress-Archive -Path $dst -DestinationPath "release\ChartshunterMediaStudio_v40_Stable.zip" -Force
 
       - name: Upload workflow artifact
@@ -113,12 +92,10 @@ print(f"Restored {len(parts)} source bundle parts.")
           GH_TOKEN: ${{ github.token }}
         run: |
           git fetch --tags
-
           if (-not (git tag -l "v40")) {
             git tag v40
             git push origin v40
           }
-
           if (gh release view v40 *> $null) {
             gh release upload v40 `
               "release\ChartshunterMediaStudio_v40_Stable.zip" `
