@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 430px; font-family: Segoe UI, Arial, sans-serif; font-size: 12px; margin: 10px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    button { margin: 4px 4px 4px 0; padding: 6px 8px; }
+    .hint { color: #555; line-height: 1.35; margin-bottom: 8px; }
+    .item { border-top: 1px solid #ddd; padding: 6px 0; }
+    .title { font-weight: 600; }
+    .url { font-family: Consolas, monospace; word-break: break-all; color: #333; }
+    .small { color: #777; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>Chartshunter Stream Capture</h1>
+  <div class="hint">
+    Video sayfasını aç, gerçek video oynarken bekle. Reklam/intro bittikten sonra yakalanan .m3u8/.mpd/.mp4 linklerini Chartshunter formatında kopyalayabilirsin.
+  </div>
+  <button id="copy">Copy for Chartshunter</button>
+  <button id="clear">Clear</button>
+  <button id="refresh">Refresh</button>
+  <div id="status" class="small"></div>
+  <div id="list"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+faster-whisper
+edge-tts
+yt-dlp
+gallery-dl
+streamlink
+curl_cffi
+you-get
+playwright
+requests

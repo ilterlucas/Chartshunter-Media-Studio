@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.runtime/
+outputs/
+*.log
+failed_links_*.txt
+failed_browser_pages_*.txt
+build/
+release/

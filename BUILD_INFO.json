@@ -1,0 +1,16 @@
+{
+  "name": "Chartshunter Media Studio",
+  "version": "v40",
+  "channel": "Stable",
+  "date": "2026-09-12",
+  "entrypoint": "Chartshunter Media Studio.exe",
+  "startup_policy": "light validation + first-session metadata check only",
+  "lazy_components": true,
+  "defaults": {
+    "download_engine": "Auto+",
+    "quality": "MP4 1080p",
+    "speed": "Hızlı",
+    "hard_mode": true,
+    "adult_video_host_mode": true
+  }
+}

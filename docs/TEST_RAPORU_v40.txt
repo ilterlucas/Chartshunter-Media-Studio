@@ -1,0 +1,31 @@
+Chartshunter Media Studio v40 Stable - Test Raporu
+==================================================
+
+PASS - app.py / bootstrap.py / maintenance.py / self_test.py syntax
+PASS - app.py import ve core self-test
+PASS - APP_VERSION = v40
+PASS - grup/link parser
+PASS - dosya adı temizleme
+PASS - fatal download error algılama
+PASS - indirme hız satırı parser
+PASS - varsayılan hız = Hızlı
+PASS - Zorlayıcı mod = Açık
+PASS - Adult/video-host uyum modu = Açık
+PASS - açılış warm-up kurulumu kaldırıldı
+PASS - ilk oturum update metadata kontrolü mevcut
+PASS - metadata kontrolü hiçbir runtime/paket kurmadan çalışıyor (deterministik smoke test)
+PASS - Tkinter GUI smoke test (1220x790, sekmeler ve status alanı)
+PASS - gerçek lokal HTTP -> direct FFmpeg download entegrasyon testi
+       çıktı: localtest/localtest0001.mp4, progress %100
+PASS - ZIP bütünlük testi (oluşturma sonrası doğrulanacak)
+
+Mimari doğrulama:
+- Açılışta büyük paket/model/browser kurulumu yok.
+- Her yeni sürümün ilk oturumunda yalnızca güncelleme metadata'sı okunur.
+- Eksik paket/model/sistem aracı kullanım anında kullanıcı onayı ister.
+- Kurulu bileşende update bilgisi varsa kullanım anında güncelle / mevcut sürümle devam et seçeneği çıkar.
+- Whisper cached model yeniden indirilmez; yeni revision bilgisi varsa kullanım anında sorulur.
+
+Not:
+Gerçek üçüncü taraf sitelerdeki indirme sonucu site tarafındaki değişiklik, erişim, rate-limit ve stream yapısına bağlıdır.
+DRM/ödeme duvarı/erişim kontrolü aşma işlevi yoktur.
