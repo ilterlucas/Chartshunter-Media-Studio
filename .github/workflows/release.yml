@@ -1,0 +1,137 @@
+name: Build Windows Stable Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Restore source bundle on first publish
+        shell: pwsh
+        run: |
+          if (Test-Path "bootstrap\source_bundle.part00.b64") {
+            @'
+import base64, glob, io, lzma, tarfile
+from pathlib import Path
+
+parts = sorted(glob.glob("bootstrap/source_bundle.part*.b64"))
+if len(parts) != 9:
+    raise SystemExit(f"Expected 9 source parts, found {len(parts)}")
+
+data = "".join(Path(p).read_text(encoding="utf-8").strip() for p in parts)
+archive = lzma.decompress(base64.b64decode(data))
+
+with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tf:
+    tf.extractall(".")
+
+print(f"Restored {len(parts)} source bundle parts.")
+'@ | Set-Content restore_bundle.py -Encoding UTF8
+            python restore_bundle.py
+            Remove-Item restore_bundle.py
+          }
+
+      - name: Verify Python source
+        shell: pwsh
+        run: |
+          python -m py_compile src\app.py src\bootstrap.py src\maintenance.py src\self_test.py
+
+      - name: Publish readable source tree
+        shell: pwsh
+        run: |
+          if (Test-Path "bootstrap\source_bundle.part00.b64") {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md .gitignore CHANGELOG.md PUBLISHING.md BUILD_INFO.json src launcher chrome_capture_extension docs
+            git rm -r bootstrap
+            git commit -m "Publish v40 Stable source [skip ci]"
+            git push origin HEAD:main
+          }
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Build Windows launchers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release\ChartshunterMediaStudio_v40 | Out-Null
+          Push-Location launcher
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v40\Chartshunter Media Studio.exe" main.go
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v40\Repair & Update.exe" repair.go
+          Pop-Location
+
+      - name: Assemble Windows package
+        shell: pwsh
+        run: |
+          $dst = "release\ChartshunterMediaStudio_v40"
+          Copy-Item src\app.py $dst
+          Copy-Item src\bootstrap.py $dst
+          Copy-Item src\maintenance.py $dst
+          Copy-Item src\self_test.py $dst
+          Copy-Item src\requirements.txt $dst
+          Copy-Item README.md "$dst\README_TR.md"
+          Copy-Item docs\KULLANIM_KILAVUZU_TR.md $dst
+          Copy-Item CHANGELOG.md "$dst\CHANGELOG_v40.md"
+          Copy-Item docs\TEST_RAPORU_v40.txt $dst
+          Copy-Item BUILD_INFO.json $dst
+          Copy-Item chrome_capture_extension "$dst\chrome_capture_extension" -Recurse
+
+          Get-FileHash "$dst\Chartshunter Media Studio.exe", "$dst\Repair & Update.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content "$dst\SHA256SUMS.txt"
+
+          Compress-Archive -Path $dst -DestinationPath "release\ChartshunterMediaStudio_v40_Stable.zip" -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChartshunterMediaStudio-v40-Windows
+          path: release/*
+
+      - name: Publish or update v40 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --tags
+
+          if (-not (git tag -l "v40")) {
+            git tag v40
+            git push origin v40
+          }
+
+          if (gh release view v40 *> $null) {
+            gh release upload v40 `
+              "release\ChartshunterMediaStudio_v40_Stable.zip" `
+              "release\ChartshunterMediaStudio_v40\Chartshunter Media Studio.exe" `
+              "release\ChartshunterMediaStudio_v40\Repair & Update.exe" `
+              "release\ChartshunterMediaStudio_v40\SHA256SUMS.txt" `
+              --clobber
+          } else {
+            gh release create v40 `
+              "release\ChartshunterMediaStudio_v40_Stable.zip" `
+              "release\ChartshunterMediaStudio_v40\Chartshunter Media Studio.exe" `
+              "release\ChartshunterMediaStudio_v40\Repair & Update.exe" `
+              "release\ChartshunterMediaStudio_v40\SHA256SUMS.txt" `
+              --title "Chartshunter Media Studio v40 Stable" `
+              --notes-file CHANGELOG.md
+          }
