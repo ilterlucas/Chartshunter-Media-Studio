@@ -1,0 +1,3 @@
+# Chartshunter Media Studio
+
+Preparing **v40 Stable** source and Windows release…
