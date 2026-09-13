@@ -3553,6 +3553,12 @@ class App(tk.Tk):
             total = int(current_link_context.get("total") or total_urls)
             return f"Video {idx}/{total}" if idx > 0 else "Video"
 
+        def overall_download_percent(file_percent: float) -> float:
+            idx = max(1, int(current_link_context.get("index") or 1))
+            total = max(1, int(current_link_context.get("total") or total_urls))
+            local = max(0.0, min(100.0, float(file_percent)))
+            return ((idx - 1) + local / 100.0) / total * 100.0
+
         def engine_timeout(url: str, normal: float = 180.0) -> float:
             # VK erişilemez linklerde motor zincirinin dakikalarca takılmasını engeller.
             return 75.0 if is_vk_url(url) else normal
@@ -3756,7 +3762,7 @@ class App(tk.Tk):
 
                 for attempt_no, args in enumerate(attempts, start=1):
                     try:
-                        self.set_progress(94, f"{progress_prefix()} • parçalar birleştiriliyor ({attempt_no}/3)")
+                        self.set_progress(overall_download_percent(94), f"{progress_prefix()} • parçalar birleştiriliyor ({attempt_no}/3)")
                         self.set_download_speed("birleştiriliyor")
                         run_ffmpeg(args, self.cancel_event)
                         if target.exists() and target.stat().st_size > 0:
@@ -3822,7 +3828,7 @@ class App(tk.Tk):
                     downloaded = float(d.get("downloaded_bytes") or 0)
                     total = float(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
                     file_percent = max(0.0, min(100.0, downloaded / total * 100)) if total > 0 else 0.0
-                    self.set_progress(file_percent, f"{progress_prefix()} • yt-dlp indiriyor | Dosya %{file_percent:.1f}")
+                    self.set_progress(overall_download_percent(file_percent), f"{progress_prefix()} • yt-dlp | dosya %{file_percent:.1f}")
 
                     if current_time - last_log_time >= 5:
                         extra = "boyut bilinmiyor"
@@ -3857,7 +3863,7 @@ class App(tk.Tk):
 
                 elif status == "finished":
                     filename = d.get("filename") or "dosya"
-                    self.set_progress(90, f"{progress_prefix()} • indirme bitti, dönüştürme/birleştirme")
+                    self.set_progress(overall_download_percent(90), f"{progress_prefix()} • indirme bitti, dönüştürme/birleştirme")
                     self.set_download_speed("işleniyor")
                     self.log(f"yt-dlp indirme tamamlandı, işleniyor: {Path(filename).name}")
 
@@ -4214,7 +4220,7 @@ class App(tk.Tk):
                                 now = time.time()
                                 if total > 0:
                                     pct = downloaded / total * 100
-                                    self.set_progress(pct, f"{progress_prefix()} • Cobalt indiriyor | Dosya %{pct:.1f}")
+                                    self.set_progress(overall_download_percent(pct), f"{progress_prefix()} • Cobalt | dosya %{pct:.1f}")
                                 if now - last_log >= 5:
                                     dt = max(0.1, now - started)
                                     self.set_download_speed(format_download_speed(downloaded / dt))
@@ -4454,6 +4460,12 @@ class App(tk.Tk):
                 line_name = str(item.get("name") or "").strip()
                 link_referer = str(item.get("referer") or "").strip() or None
                 current_link_context["referer"] = link_referer
+                current_link_context["index"] = url_index
+                current_link_context["total"] = total_urls
+                host_label = (urlparse(url).hostname or "").replace("www.", "")
+                display_label = line_name or host_label or "video"
+                current_link_context["label"] = display_label
+                self.set_batch_progress(url_index, total_urls, display_label[:46])
 
                 # Link grup/başlık adıyla eşleştiyse o ad mutlak önceliklidir.
                 # Dosya adı kökü kutusu bu senaryoda yok sayılır.
@@ -4473,8 +4485,8 @@ class App(tk.Tk):
                 output_dir.mkdir(parents=True, exist_ok=True)
 
                 base_percent = (url_index - 1) / total_urls * 100
-                self.set_progress(base_percent, f"Link {url_index}/{total_urls} başlıyor")
-                self.log(f"Link işleniyor {url_index}/{total_urls}: {url}")
+                self.set_progress(base_percent, f"Video {url_index}/{total_urls} başlıyor")
+                self.log(f"Video işleniyor {url_index}/{total_urls}: {url}")
                 if link_referer:
                     self.log(f"Kaynak sayfa/referer kullanılacak: {link_referer}")
                 if line_name:
@@ -4520,9 +4532,10 @@ class App(tk.Tk):
                     else:
                         self.log("UYARI: Bu link hiçbir motorla indirilemedi, sıradakine geçiliyor.")
 
-                self.set_progress(url_index / total_urls * 100, f"Link {url_index}/{total_urls} tamam")
+                self.set_progress(url_index / total_urls * 100, f"Video {url_index}/{total_urls} tamam")
 
-            self.set_progress(100, "Link indirme işlemi bitti")
+            self.set_progress(100, f"İndirme bitti • {success_count}/{total_urls} başarılı")
+            self.set_batch_progress(total_urls, total_urls, "tamamlandı")
             self.set_download_speed("-")
             if failed_links:
                 try:
@@ -4536,8 +4549,10 @@ class App(tk.Tk):
 
         except UserCancelled:
             self.set_progress(self.progress_var.get(), "İndirme iptal edildi")
+            self.set_batch_progress()
             self.log("İndirme kullanıcı tarafından iptal edildi.")
         except Exception as e:
+            self.set_batch_progress()
             self.log(f"HATA: Link indirme başarısız: {e}")
             self.log("Not: Her site desteklenmez; DRM/ödeme duvarı/özel hesap/teknik koruma aşılmaz.")
 
