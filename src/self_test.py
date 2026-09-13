@@ -18,7 +18,7 @@ for name in ['app.py','bootstrap.py','maintenance.py','self_test.py']:
     check(f'{name} syntax', lambda n=name: ast.parse((ROOT/n).read_text(encoding='utf-8')))
 
 import app
-check('version', lambda: assert_true(app.APP_VERSION=='v41', app.APP_VERSION))
+check('version', lambda: assert_true(app.APP_VERSION=='v42', app.APP_VERSION))
 check('group parser', lambda: assert_true(len(app.parse_download_input_grouped('alpha\nhttps://example.com/a\nhttps://example.com/b'))==2))
 check('filename sanitize', lambda: assert_true(app.sanitize_file_base('chart hunter: 2026!*')=='chart_hunter_2026'))
 check('fatal download detection', lambda: assert_true(app.is_fatal_download_error_text('NameResolutionError: failed to resolve host')))
@@ -34,6 +34,10 @@ check('Brave-first cookie default', lambda: assert_true('self.dl_cookies_browser
 check('batch video progress', lambda: assert_true('self.batch_progress_text' in app_text and 'Video {current}/{total}' in app_text))
 check('nonblocking CLI timeout', lambda: assert_true('line_queue: queue.Queue' in app_text and 'Zaman aşımı' in app_text))
 check('split part recovery', lambda: assert_true('recover_split_media_parts' in app_text and 'ffprobe' in app_text))
+check('download link status colors', lambda: assert_true('dl_status_success' in app_text and 'dl_status_failed' in app_text))
+check('failed link overstrike', lambda: assert_true('overstrike=True' in app_text))
+check('download status summary', lambda: assert_true('download_status_text' in app_text and '_set_download_line_status' in app_text))
+check('parser line metadata used', lambda: assert_true('"line": line_no' in app_text))
 check('update package map', lambda: assert_true(app.UPDATE_PACKAGE_MAP.get('yt_dlp')=='yt-dlp'))
 check('whisper repo map', lambda: assert_true('small' in app.WHISPER_REPOS))
 check('no startup warmup install', lambda: assert_true('_start_balanced_startup_warmup' not in app_text))

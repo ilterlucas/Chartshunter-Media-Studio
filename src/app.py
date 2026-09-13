@@ -24,8 +24,8 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-APP_NAME = "Chartshunter Media Studio v41"
-APP_VERSION = "v41"
+APP_NAME = "Chartshunter Media Studio v42"
+APP_VERSION = "v42"
 
 MEDIA_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
@@ -3087,6 +3087,78 @@ class App(tk.Tk):
             "Bu akış tarayıcıda erişebildiğin açık streamleri bulmaya çalışır. DRM, ödeme duvarı, özel hesap veya erişim kontrolü aşma amacıyla kullanılmaz."
         )
 
+    def _prepare_download_link_statuses(self, total: int) -> None:
+        """Yeni indirme turu başlarken link renklendirmelerini sıfırlar."""
+        self._download_status_total = max(0, int(total or 0))
+        self._download_line_statuses = {}
+
+        def _apply() -> None:
+            try:
+                for tag in ("dl_status_success", "dl_status_failed", "dl_status_processing", "dl_status_cancelled"):
+                    self.dl_url_text.tag_remove(tag, "1.0", "end")
+                self._refresh_download_status_summary()
+            except Exception:
+                pass
+
+        self.after(0, _apply)
+
+    def _refresh_download_status_summary(self) -> None:
+        """Link kutusunun altındaki kısa başarı/başarısızlık özetini yeniler."""
+        statuses = getattr(self, "_download_line_statuses", {}) or {}
+        total = max(0, int(getattr(self, "_download_status_total", 0) or 0))
+        done = sum(1 for value in statuses.values() if value == "success")
+        failed = sum(1 for value in statuses.values() if value == "failed")
+        processing = sum(1 for value in statuses.values() if value == "processing")
+        cancelled = sum(1 for value in statuses.values() if value == "cancelled")
+        pending = max(0, total - done - failed - processing - cancelled)
+
+        parts = [f"✓ {done} indirildi", f"✕ {failed} indirilemedi"]
+        if processing:
+            parts.append(f"● {processing} işleniyor")
+        if cancelled:
+            parts.append(f"■ {cancelled} iptal/yarım")
+        if pending:
+            parts.append(f"○ {pending} bekliyor")
+        self.download_status_text.set("Durum: " + "   •   ".join(parts))
+
+    def _set_download_line_status(self, line_no: int | None, status: str) -> None:
+        """
+        Çoklu link kutusunda tek satırın durumunu görsel olarak işaretler.
+        success=yeşil, failed=kırmızı+üstü çizili, processing=sarı, cancelled=gri.
+        """
+        try:
+            line_no = int(line_no or 0)
+        except Exception:
+            line_no = 0
+        if line_no <= 0:
+            return
+
+        tag_map = {
+            "success": "dl_status_success",
+            "failed": "dl_status_failed",
+            "processing": "dl_status_processing",
+            "cancelled": "dl_status_cancelled",
+        }
+        tag = tag_map.get(status)
+        if not tag:
+            return
+
+        def _apply() -> None:
+            try:
+                start = f"{line_no}.0"
+                end = f"{line_no}.end"
+                for old_tag in tag_map.values():
+                    self.dl_url_text.tag_remove(old_tag, start, end)
+                self.dl_url_text.tag_add(tag, start, end)
+                self._download_line_statuses[line_no] = status
+                self._refresh_download_status_summary()
+                if status in {"success", "failed"}:
+                    self.dl_url_text.see(start)
+            except Exception:
+                pass
+
+        self.after(0, _apply)
+
     def _build_download_tab(self) -> None:
         f = self.tab_download
         f.columnconfigure(0, weight=1)
@@ -3113,6 +3185,9 @@ class App(tk.Tk):
         self.dl_name_mode_text = tk.StringVar(
             value="Başlık/grup yazarsan dosya adı kökü devre dışı kalır. Örn: chartshunter satırı altındaki linkler aynı klasöre iner."
         )
+        self.download_status_text = tk.StringVar(value="Durum: henüz indirme yapılmadı")
+        self._download_line_statuses: dict[int, str] = {}
+        self._download_status_total = 0
         self.external_helper = tk.StringVar(value="SaveFrom.net")
 
         intro = ttk.LabelFrame(f, text="1) Linkleri yapıştır", style="Section.TLabelframe")
@@ -3127,10 +3202,23 @@ class App(tk.Tk):
             wraplength=980,
         ).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
 
-        self.dl_url_text = ScrolledText(intro, height=6, font=("Consolas", 9))
-        self.dl_url_text.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 10))
+        self.dl_url_text = ScrolledText(intro, height=7, font=("Consolas", 9))
+        self.dl_url_text.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 4))
         self.dl_url_text.insert("end", "# Örnek kullanım:\n# chartshunter\n# https://site.com/video1\n# https://site.com/video2\n#\n# othername\n# https://site.com/video3\n")
+        self.dl_url_text.tag_configure("dl_status_success", background="#DCFCE7", foreground="#166534")
+        self.dl_url_text.tag_configure("dl_status_failed", background="#FEE2E2", foreground="#991B1B", overstrike=True)
+        self.dl_url_text.tag_configure("dl_status_processing", background="#FEF3C7", foreground="#92400E")
+        self.dl_url_text.tag_configure("dl_status_cancelled", background="#E5E7EB", foreground="#4B5563")
         self.dl_url_text.bind("<KeyRelease>", self.update_download_preview)
+
+        status_row = ttk.Frame(intro)
+        status_row.grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 9))
+        status_row.columnconfigure(1, weight=1)
+        ttk.Label(status_row, text="●", foreground="#166534", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(status_row, text=" indirildi   ").grid(row=0, column=1, sticky="w")
+        ttk.Label(status_row, text="●", foreground="#991B1B", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, sticky="w")
+        ttk.Label(status_row, text=" indirilemedi / üstü çizili   ").grid(row=0, column=3, sticky="w")
+        ttk.Label(status_row, textvariable=self.download_status_text, font=("Segoe UI Semibold", 9)).grid(row=0, column=4, sticky="e", padx=(12, 0))
 
         capture = ttk.LabelFrame(f, text="1B) Dahili Browser / UniTube tarzı stream yakalama", style="Section.TLabelframe")
         capture.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
@@ -3458,7 +3546,12 @@ class App(tk.Tk):
             name = str(name_value).strip() if name_value else None
             ref_value = item.get("referer")
             referer = str(ref_value).strip() if ref_value else None
-            download_items.append({"name": name, "url": url, "referer": referer})
+            line_value = item.get("line")
+            try:
+                line_no = int(line_value) if line_value is not None else None
+            except Exception:
+                line_no = None
+            download_items.append({"name": name, "url": url, "referer": referer, "line": line_no})
 
         if not download_items:
             self.log("İndirilecek link yok. Linkleri kutuya yapıştır.")
@@ -3523,6 +3616,9 @@ class App(tk.Tk):
             self.log("Dosya adı kökü boş. yt-dlp kaynak başlığına göre adlandırır; fallback motorlar download0001 diye adlandırır.")
 
         self.log("Hatalı link/playlist öğesi olursa atlanacak ve sıradakine geçilecek.")
+        visible_status_enabled = raw_override is None
+        if visible_status_enabled:
+            self._prepare_download_link_statuses(len(download_items))
         self.set_progress(0, "Link indirme başladı")
         self.set_download_speed("-")
 
@@ -4450,6 +4546,7 @@ class App(tk.Tk):
         success_count = 0
         failed_count = 0
         failed_links: list[str] = []
+        current_line_no: int | None = None
 
         try:
             for url_index, item in enumerate(download_items, start=1):
@@ -4459,6 +4556,13 @@ class App(tk.Tk):
                 url = str(item.get("url") or "").strip()
                 line_name = str(item.get("name") or "").strip()
                 link_referer = str(item.get("referer") or "").strip() or None
+                line_value = item.get("line")
+                try:
+                    current_line_no = int(line_value) if line_value is not None else None
+                except Exception:
+                    current_line_no = None
+                if visible_status_enabled:
+                    self._set_download_line_status(current_line_no, "processing")
                 current_link_context["referer"] = link_referer
                 current_link_context["index"] = url_index
                 current_link_context["total"] = total_urls
@@ -4523,9 +4627,13 @@ class App(tk.Tk):
 
                 if ok:
                     success_count += 1
+                    if visible_status_enabled:
+                        self._set_download_line_status(current_line_no, "success")
                     self.log(f"Link tamamlandı: {url}")
                 else:
                     failed_count += 1
+                    if visible_status_enabled:
+                        self._set_download_line_status(current_line_no, "failed")
                     failed_links.append(url)
                     if fatal_stop:
                         self.log("UYARI: Bu link net URL/DNS/erişim hatası verdi; bu link atlandı.")
@@ -4548,10 +4656,14 @@ class App(tk.Tk):
             self.log(f"Link indirme bitti. Başarılı: {success_count} | Başarısız: {failed_count} | Ana çıktı: {base_output_dir}")
 
         except UserCancelled:
+            if visible_status_enabled:
+                self._set_download_line_status(current_line_no, "cancelled")
             self.set_progress(self.progress_var.get(), "İndirme iptal edildi")
             self.set_batch_progress()
             self.log("İndirme kullanıcı tarafından iptal edildi.")
         except Exception as e:
+            if visible_status_enabled:
+                self._set_download_line_status(current_line_no, "failed")
             self.set_batch_progress()
             self.log(f"HATA: Link indirme başarısız: {e}")
             self.log("Not: Her site desteklenmez; DRM/ödeme duvarı/özel hesap/teknik koruma aşılmaz.")

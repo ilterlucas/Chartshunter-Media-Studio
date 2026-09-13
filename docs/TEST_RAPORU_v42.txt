@@ -1,0 +1,33 @@
+Chartshunter Media Studio v42 - Test Raporu
+Tarih: 2026-09-13
+
+[PASS] app.py syntax/compile
+[PASS] bootstrap.py syntax/compile
+[PASS] maintenance.py syntax/compile
+[PASS] self_test.py syntax/compile
+[PASS] APP_VERSION = v42
+[PASS] Grup/link parser
+[PASS] Dosya adı temizleme
+[PASS] Genel fatal download hata tanıma
+[PASS] VK erişilemez hata tanıma
+[PASS] VK host tanıma
+[PASS] Brave cookie seçimi ve Brave-first varsayılanı
+[PASS] Çoklu Video X/Y progress
+[PASS] CLI timeout mekanizması
+[PASS] Split video/audio recovery
+[PASS] İndirilen link için yeşil durum etiketi
+[PASS] Başarısız link için kırmızı + üstü çizili durum etiketi
+[PASS] Canlı indirme durum özeti
+[PASS] Parser satır numarasının UI durumuna aktarılması
+[PASS] Açılışta warm-up install yok
+[PASS] İlk oturum update metadata kontrolü korunuyor
+[PASS] Windows ana launcher Go build
+[PASS] Windows Repair & Update launcher Go build
+
+GitHub Actions Windows test sonucu: SUCCESS
+Workflow run: 34782048201
+
+Notlar:
+- Testler Windows GitHub runner üzerinde compile/statik/core regresyon testleridir.
+- Canlı üçüncü taraf sitelerle gerçek indirme testi yapılmadı.
+- Link renklendirmesi normal yapıştırılmış link listesinde çalışır; dahili browser override akışında görünür kutuyla satır eşleşmesi olmadığı için yanlış satır renklendirilmez.

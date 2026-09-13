@@ -38,16 +38,16 @@ jobs:
       - name: Build Windows launchers
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release\ChartshunterMediaStudio_v41 | Out-Null
+          New-Item -ItemType Directory -Force release\ChartshunterMediaStudio_v42 | Out-Null
           Push-Location launcher
-          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v41\Chartshunter Media Studio.exe" main.go
-          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v41\Repair & Update.exe" repair.go
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v42\Chartshunter Media Studio.exe" main.go
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\release\ChartshunterMediaStudio_v42\Repair & Update.exe" repair.go
           Pop-Location
 
       - name: Assemble Windows package
         shell: pwsh
         run: |
-          $dst = "release\ChartshunterMediaStudio_v41"
+          $dst = "release\ChartshunterMediaStudio_v42"
           Copy-Item src\app.py $dst
           Copy-Item src\bootstrap.py $dst
           Copy-Item src\maintenance.py $dst
@@ -55,8 +55,8 @@ jobs:
           Copy-Item src\requirements.txt $dst
           Copy-Item README.md "$dst\README_TR.md"
           Copy-Item docs\KULLANIM_KILAVUZU_TR.md $dst
-          Copy-Item CHANGELOG.md "$dst\CHANGELOG_v41.md"
-          Copy-Item docs\TEST_RAPORU_v41.txt $dst
+          Copy-Item CHANGELOG.md "$dst\CHANGELOG_v42.md"
+          Copy-Item docs\TEST_RAPORU_v42.txt $dst
           Copy-Item BUILD_INFO.json $dst
           Copy-Item chrome_capture_extension "$dst\chrome_capture_extension" -Recurse
 
@@ -64,39 +64,39 @@ jobs:
             ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content "$dst\SHA256SUMS.txt"
 
-          Compress-Archive -Path $dst -DestinationPath "release\ChartshunterMediaStudio_v41_Stable.zip" -Force
+          Compress-Archive -Path $dst -DestinationPath "release\ChartshunterMediaStudio_v42_Stable.zip" -Force
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChartshunterMediaStudio-v41-Windows
+          name: ChartshunterMediaStudio-v42-Windows
           path: release/*
 
-      - name: Publish or update v41 release
+      - name: Publish or update v42 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git fetch --tags
 
-          if (-not (git tag -l "v41")) {
-            git tag v41
-            git push origin v41
+          if (-not (git tag -l "v42")) {
+            git tag v42
+            git push origin v42
           }
 
-          if (gh release view v41 *> $null) {
-            gh release upload v41 `
-              "release\ChartshunterMediaStudio_v41_Stable.zip" `
-              "release\ChartshunterMediaStudio_v41\Chartshunter Media Studio.exe" `
-              "release\ChartshunterMediaStudio_v41\Repair & Update.exe" `
-              "release\ChartshunterMediaStudio_v41\SHA256SUMS.txt" `
+          if (gh release view v42 *> $null) {
+            gh release upload v42 `
+              "release\ChartshunterMediaStudio_v42_Stable.zip" `
+              "release\ChartshunterMediaStudio_v42\Chartshunter Media Studio.exe" `
+              "release\ChartshunterMediaStudio_v42\Repair & Update.exe" `
+              "release\ChartshunterMediaStudio_v42\SHA256SUMS.txt" `
               --clobber
           } else {
-            gh release create v41 `
-              "release\ChartshunterMediaStudio_v41_Stable.zip" `
-              "release\ChartshunterMediaStudio_v41\Chartshunter Media Studio.exe" `
-              "release\ChartshunterMediaStudio_v41\Repair & Update.exe" `
-              "release\ChartshunterMediaStudio_v41\SHA256SUMS.txt" `
-              --title "Chartshunter Media Studio v41 Stable" `
+            gh release create v42 `
+              "release\ChartshunterMediaStudio_v42_Stable.zip" `
+              "release\ChartshunterMediaStudio_v42\Chartshunter Media Studio.exe" `
+              "release\ChartshunterMediaStudio_v42\Repair & Update.exe" `
+              "release\ChartshunterMediaStudio_v42\SHA256SUMS.txt" `
+              --title "Chartshunter Media Studio v42 Stable" `
               --notes-file CHANGELOG.md
           }
