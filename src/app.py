@@ -3336,6 +3336,7 @@ class App(tk.Tk):
             h = height_match.group(1)
             # MP4 uyumlu çıktı hedeflenir; ayrı video+ses gelirse FFmpeg MP4'e birleştirir.
             return (
+                f"bv*[height<={h}][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/"
                 f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/"
                 f"b[height<={h}][ext=mp4]/"
                 f"bv*[height<={h}]+ba/b[height<={h}]/best",
@@ -3343,7 +3344,11 @@ class App(tk.Tk):
             )
 
         if mode == "MP4 en iyi":
-            return "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best", "mp4"
+            return (
+                "bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/"
+                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
+                "mp4",
+            )
 
         return "bestvideo*+bestaudio/best", None
 
