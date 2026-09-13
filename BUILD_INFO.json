@@ -1,8 +1,8 @@
 {
   "name": "Chartshunter Media Studio",
-  "version": "v40",
-  "channel": "Stable",
-  "date": "2026-09-12",
+  "version": "v41",
+  "channel": "Development",
+  "date": "2026-09-13",
   "entrypoint": "Chartshunter Media Studio.exe",
   "startup_policy": "light validation + first-session metadata check only",
   "lazy_components": true,
@@ -11,6 +11,12 @@
     "quality": "MP4 1080p",
     "speed": "Hızlı",
     "hard_mode": true,
-    "adult_video_host_mode": true
+    "adult_video_host_mode": true,
+    "cookie_browser": "Auto (Brave first)"
+  },
+  "download_fixes": {
+    "vk_fail_fast": true,
+    "split_media_recovery": true,
+    "batch_video_progress": true
   }
 }
