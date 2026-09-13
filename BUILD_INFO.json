@@ -1,7 +1,7 @@
 {
   "name": "Chartshunter Media Studio",
   "version": "v41",
-  "channel": "Development",
+  "channel": "Stable",
   "date": "2026-09-13",
   "entrypoint": "Chartshunter Media Studio.exe",
   "startup_policy": "light validation + first-session metadata check only",
