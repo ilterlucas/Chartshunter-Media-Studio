@@ -3993,15 +3993,23 @@ class App(tk.Tk):
             else:
                 outtmpl = str(output_dir / "%(title).160B [%(id)s].%(ext)s")
 
+            if merge_format or is_mp3_download_mode(mode):
+                if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                    return False
+
             args = python_module_or_exe("yt_dlp", "yt-dlp")
-            args += ["--ignore-errors", "--continue", "--no-overwrites", "--windows-filenames"]
+            args += ["--continue", "--no-overwrites", "--windows-filenames", "--socket-timeout", "20"]
+            if allow_playlist:
+                args += ["--ignore-errors"]
+            if is_vk_url(url):
+                args += ["--retries", "2", "--fragment-retries", "3", "--extractor-retries", "1"]
             if safe_base:
                 args += ["--autonumber-start", str(autonumber_start)]
             args += ["--no-playlist"] if not allow_playlist else ["--yes-playlist"]
             args += ["-f", format_string, "-o", outtmpl]
 
             if merge_format:
-                args += ["--merge-output-format", merge_format]
+                args += ["--merge-output-format", merge_format, "--remux-video", "mp4"]
             if is_mp3_download_mode(mode):
                 args += ["-x", "--audio-format", "mp3", "--audio-quality", f"{mp3_quality_for_mode(mode)}K"]
 
@@ -4028,19 +4036,27 @@ class App(tk.Tk):
             if current_adult_profile(url):
                 args += ["--age-limit", "18", "--geo-bypass"]
 
-            if cookies_browser != "Yok":
-                args += ["--cookies-from-browser", cookies_browser.lower()]
+            if cookies_browser:
+                args += ["--cookies-from-browser", cookies_browser]
 
             args.append(url)
 
-            ok, out = run_process_capture(args)
+            ok, out = run_process_capture(args, timeout=engine_timeout(url, 240.0))
             created = new_files_since(before)
-            if created:
-                for f in created[:10]:
+            finals = complete_media_files(created)
+            if finals:
+                for f in finals[:10]:
                     self.log(f"yt-dlp zorlayıcı yeni dosya: {f.name}")
                 return True
+
+            recovered = recover_split_media_parts(before)
+            if recovered is not None:
+                return True
+
             if not ok:
                 self.log(f"yt-dlp zorlayıcı başarısız: {out[-700:] if out else 'çıktı yok'}")
+            elif created:
+                self.log("yt-dlp zorlayıcı parça üretti ancak final medya oluşmadı; sıradaki motora geçiliyor.")
             return False
 
         def try_cobalt_api(url: str) -> bool:
@@ -4198,7 +4214,7 @@ class App(tk.Tk):
                                 now = time.time()
                                 if total > 0:
                                     pct = downloaded / total * 100
-                                    self.set_progress(pct, f"Cobalt indiriyor | Dosya %{pct:.1f}")
+                                    self.set_progress(pct, f"{progress_prefix()} • Cobalt indiriyor | Dosya %{pct:.1f}")
                                 if now - last_log >= 5:
                                     dt = max(0.1, now - started)
                                     self.set_download_speed(format_download_speed(downloaded / dt))
