@@ -3464,7 +3464,8 @@ class App(tk.Tk):
         mode = self.dl_mode.get()
         engine_choice = self.dl_engine.get()
         speed_mode = self.dl_speed_mode.get()
-        cookies_browser = self.dl_cookies_browser.get()
+        cookies_browser_choice = self.dl_cookies_browser.get()
+        cookies_browser = resolve_cookie_browser_choice(cookies_browser_choice)
         hard_mode = bool(self.dl_hard_mode.get())
         adult_profile = bool(getattr(self, "dl_adult_profile", tk.BooleanVar(value=True)).get())
         adult_detected = has_adult_video_host_url(download_items)
@@ -3483,12 +3484,15 @@ class App(tk.Tk):
         self.after(0, self.update_download_preview)
 
         self.log(f"Link indirme başladı. Link sayısı: {len(download_items)} | Tür: {mode}")
-        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez: {cookies_browser} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        cookie_display = cookies_browser.title() if cookies_browser else "Yok"
+        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez seçimi: {cookies_browser_choice} -> {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        if cookies_browser_choice == COOKIE_BROWSER_AUTO and not cookies_browser:
+            self.log("Tarayıcı çerezi otomatik seçiminde kullanılabilir profil bulunamadı; çerezsiz devam edilecek.")
         self.log(f"Cobalt API: {self.dl_cobalt_api_url.get().strip() or 'Kapalı'}")
         if adult_detected:
             self.log("Adult/video-host alan adı algılandı. Uyum profili aktif: age-limit/header/referer/consent yakalama ayarları güçlendirilecek.")
-            if cookies_browser == "Yok":
-                self.log("Not: Bazı yetişkin video sitelerinde yaş/giriş onayı için Chrome/Edge çerezleri seçmek gerekebilir.")
+            if not cookies_browser:
+                self.log("Not: Bazı sitelerde yaş/giriş onayı için Brave/Chrome/Edge/Firefox oturum çerezleri gerekebilir.")
         if speed_mode == "Çok Hızlı (aria2c varsa)":
             if not shutil.which("aria2c"):
                 self._ensure_system_tool("aria2c", "aria2.aria2", "aria2c hızlandırıcı", required=False)
@@ -3527,7 +3531,7 @@ class App(tk.Tk):
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/121.0.0.0 Safari/537.36"
         )
-        current_link_context = {"referer": None}
+        current_link_context = {"referer": None, "index": 0, "total": total_urls, "label": ""}
 
         def current_referer(default_url: str) -> str:
             return str(current_link_context.get("referer") or default_url)
@@ -3538,6 +3542,15 @@ class App(tk.Tk):
         def current_hard_mode(url: str) -> bool:
             # Adult/video-host profili açıksa hard davranışı otomatik kullanılır.
             return bool(hard_mode or current_adult_profile(url))
+
+        def progress_prefix() -> str:
+            idx = int(current_link_context.get("index") or 0)
+            total = int(current_link_context.get("total") or total_urls)
+            return f"Video {idx}/{total}" if idx > 0 else "Video"
+
+        def engine_timeout(url: str, normal: float = 180.0) -> float:
+            # VK erişilemez linklerde motor zincirinin dakikalarca takılmasını engeller.
+            return 75.0 if is_vk_url(url) else normal
 
         def existing_files_snapshot() -> set[Path]:
             try:
@@ -3567,6 +3580,10 @@ class App(tk.Tk):
                 return None
 
         def run_process_capture(args: list[str], timeout: float | None = None) -> tuple[bool, str]:
+            """
+            CLI motorlarını çıktı gelmese bile gerçek zaman aşımıyla durdurur.
+            Eski readline() akışı bazı VK/host hatalarında satır üretmeyip uzun süre bekleyebiliyordu.
+            """
             process = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
@@ -3574,52 +3591,67 @@ class App(tk.Tk):
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
+                bufsize=1,
                 **subprocess_hidden_kwargs(),
             )
             output_lines: list[str] = []
             start_time = time.time()
             last_log = 0.0
+            line_queue: queue.Queue = queue.Queue()
+
+            def _reader() -> None:
+                try:
+                    if process.stdout is not None:
+                        for line in iter(process.stdout.readline, ""):
+                            line_queue.put(line)
+                finally:
+                    line_queue.put(None)
+
+            threading.Thread(target=_reader, daemon=True).start()
+
             try:
+                reader_done = False
                 while True:
                     if self.is_cancelled():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
+                        stop_process_quietly(process)
                         raise UserCancelled("İndirme kullanıcı tarafından iptal edildi.")
 
                     if timeout is not None and time.time() - start_time > timeout:
-                        process.terminate()
-                        return False, "Zaman aşımı"
+                        stop_process_quietly(process)
+                        msg = f"Zaman aşımı ({int(timeout)} sn)"
+                        self.log(msg + "; sıradaki motor/link denenecek.")
+                        return False, msg
 
-                    line = process.stdout.readline() if process.stdout is not None else ""
-                    if line:
+                    try:
+                        line = line_queue.get(timeout=0.20)
+                    except queue.Empty:
+                        line = ""
+
+                    if line is None:
+                        reader_done = True
+                    elif line:
                         clean = line.strip()
-                        output_lines.append(clean)
+                        if clean:
+                            output_lines.append(clean)
+                            if is_fatal_download_error_text(clean):
+                                stop_process_quietly(process)
+                                raise FatalDownloadError(clean)
 
-                        # Net DNS/URL açma hatalarında aynı denemeyi uzatmadan kes.
-                        # Örn: Unable to open URL / Max retries exceeded / NameResolutionError
-                        if is_fatal_download_error_text(clean):
-                            stop_process_quietly(process)
-                            raise FatalDownloadError(clean)
+                            speed_text = extract_speed_from_line(clean)
+                            if speed_text:
+                                self.set_download_speed(speed_text)
 
-                        speed_text = extract_speed_from_line(clean)
-                        if speed_text:
-                            self.set_download_speed(speed_text)
+                            if time.time() - last_log >= 8:
+                                self.log(clean[:220])
+                                last_log = time.time()
 
-                        if time.time() - last_log >= 8 and clean:
-                            self.log(clean[:220])
-                            last_log = time.time()
-                    elif process.poll() is not None:
+                    if process.poll() is not None and (reader_done or line_queue.empty()):
                         break
-                    else:
-                        time.sleep(0.1)
 
                 return process.returncode == 0, "\n".join(output_lines[-80:])
             finally:
-                if process.poll() is None and self.is_cancelled():
-                    process.terminate()
+                if process.poll() is None:
+                    stop_process_quietly(process)
 
         def try_ytdlp(url: str) -> bool:
             if not self._ensure_python_component("yt_dlp", "yt-dlp indirme motoru", ["yt-dlp"], ["yt_dlp"], weekly_update=True):
