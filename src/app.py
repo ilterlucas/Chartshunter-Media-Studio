@@ -4248,7 +4248,7 @@ class App(tk.Tk):
                     args += ["--playlist"]
                 args.append(url)
 
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 150.0))
                 if not ok:
                     self.log(f"you-get başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -4294,7 +4294,7 @@ class App(tk.Tk):
             with tempfile.TemporaryDirectory() as td:
                 tmp = Path(td)
                 args = python_module_or_exe("gallery_dl", "gallery-dl") + ["-D", str(tmp), url]
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 150.0))
                 if not ok:
                     self.log(f"gallery-dl başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -4342,11 +4342,12 @@ class App(tk.Tk):
                     return False
                 temp_out = output_dir / f"_temp_streamlink_{int(time.time())}.ts"
                 quality = quality_to_streamlink(mode)
-                args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", "3"]
+                stream_retries = "1" if is_vk_url(url) else "3"
+                args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", stream_retries]
                 if current_hard_mode(url):
                     args += ["--http-header", f"Referer={current_referer(url)}", "--http-header", f"User-Agent={browser_user_agent}"]
                 args += ["-o", str(temp_out), url, quality]
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 180.0))
                 if not ok or not temp_out.exists():
                     self.log(f"streamlink başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -4362,11 +4363,12 @@ class App(tk.Tk):
 
             out = make_final_path(".mp4")
             quality = quality_to_streamlink(mode)
-            args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", "3"]
+            stream_retries = "1" if is_vk_url(url) else "3"
+            args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", stream_retries]
             if current_hard_mode(url):
                 args += ["--http-header", f"Referer={current_referer(url)}", "--http-header", f"User-Agent={browser_user_agent}"]
             args += ["-o", str(out), url, quality]
-            ok, out_text = run_process_capture(args)
+            ok, out_text = run_process_capture(args, timeout=engine_timeout(url, 180.0))
             if ok and out.exists() and out.stat().st_size > 0:
                 self.log(f"streamlink kaydedildi: {out.name}")
                 return True
@@ -4383,6 +4385,9 @@ class App(tk.Tk):
             if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
                 return False
             if not is_probable_direct_media_url(url):
+                if is_vk_url(url):
+                    self.log("VK sayfa URL'si direct FFmpeg girdisi değil; bu motor beklemeden atlandı.")
+                    return False
                 self.log("Bu link doğrudan medya/m3u8/mpd gibi görünmüyor; FFmpeg denemesi yine yapılacak.")
 
             ffmpeg_headers = (
@@ -4391,13 +4396,14 @@ class App(tk.Tk):
                 "Accept-Language: tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7\r\n"
             )
             header_args = ["-headers", ffmpeg_headers] if current_hard_mode(url) else []
+            network_timeout_args = ["-rw_timeout", "20000000"] if url.lower().startswith(("http://", "https://")) else []
 
             if is_mp3_download_mode(mode):
                 out = make_final_path(".mp3")
-                args = ["ffmpeg", "-y", *header_args, "-i", url, "-vn", "-codec:a", "libmp3lame", "-b:a", f"{mp3_quality_for_mode(mode)}k", str(out)]
+                args = ["ffmpeg", "-y", *network_timeout_args, *header_args, "-i", url, "-vn", "-codec:a", "libmp3lame", "-b:a", f"{mp3_quality_for_mode(mode)}k", str(out)]
             else:
                 out = make_final_path(".mp4")
-                args = ["ffmpeg", "-y", *header_args, "-i", url, "-c", "copy", str(out)]
+                args = ["ffmpeg", "-y", *network_timeout_args, *header_args, "-i", url, "-c", "copy", str(out)]
             try:
                 run_ffmpeg(args, self.cancel_event)
                 if out.exists() and out.stat().st_size > 0:
