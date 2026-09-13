@@ -1,0 +1,35 @@
+Chartshunter Media Studio v41 - Test Raporu
+Tarih: 2026-09-13
+
+[PASS] app.py syntax/compile
+[PASS] bootstrap.py syntax/compile
+[PASS] maintenance.py syntax/compile
+[PASS] self_test.py syntax/compile
+[PASS] APP_VERSION = v41
+[PASS] Grup/link parser
+[PASS] Dosya adı temizleme
+[PASS] Genel fatal download hata tanıma
+[PASS] "Video is not available" VK erişilemez hata tanıma
+[PASS] VK/VK Video host tanıma
+[PASS] Brave cookie seçimi
+[PASS] Brave öncelikli otomatik çerez varsayılanı
+[PASS] Hız parser
+[PASS] Hızlı varsayılanı
+[PASS] Zorlayıcı mod varsayılan Açık
+[PASS] Adult/video-host varsayılan Açık
+[PASS] Çoklu indirmede Video X/Y progress alanı
+[PASS] CLI motorlarında bloklamayan queue tabanlı timeout mekanizması
+[PASS] Split video/audio part recovery kod yolu + ffprobe doğrulaması
+[PASS] Açılışta warm-up install yok
+[PASS] İlk oturum metadata kontrolü korunuyor
+[PASS] Windows x64 ana launcher Go build
+[PASS] Windows x64 Repair & Update launcher Go build
+
+GitHub Actions Windows test sonucu: SUCCESS
+Workflow run: 34780678941
+
+Notlar:
+- Testler Windows GitHub runner üzerinde derleme/statik/core regresyon testleridir.
+- Canlı VK veya üçüncü taraf sitelere gerçek hesap/çerez ile indirme testi yapılmadı.
+- Site davranışı, rate limit, özel video erişimi ve extractor değişiklikleri zamanla değişebilir.
+- DRM, ödeme duvarı, özel hesap veya erişim kontrolü aşma testi yapılmaz ve uygulama bunun için tasarlanmamıştır.
