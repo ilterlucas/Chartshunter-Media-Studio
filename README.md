@@ -1,18 +1,27 @@
 # Chartshunter Media Studio
 
-**Current stable release: v40 Stable**
+**Current stable release: v41 Stable**
 
-[![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v40)
-[![Release](https://img.shields.io/badge/release-v40%20Stable-brightgreen)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v40)
+[![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v41)
+[![Release](https://img.shields.io/badge/release-v41%20Stable-brightgreen)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v41)
 [![Build](https://github.com/ilterlucas/Chartshunter-Media-Studio/actions/workflows/release.yml/badge.svg)](https://github.com/ilterlucas/Chartshunter-Media-Studio/actions/workflows/release.yml)
 
 Windows için medya indirme, altyazı üretme, British UK TTS, MP3 birleştirme ve MP3 + kapak görselinden video üretme uygulaması.
 
 ## İndir
 
-**Önerilen paket:** [ChartshunterMediaStudio_v40_Stable.zip](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/download/v40/ChartshunterMediaStudio_v40_Stable.zip)
+**Önerilen paket:** [ChartshunterMediaStudio_v41_Stable.zip](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/download/v41/ChartshunterMediaStudio_v41_Stable.zip)
 
-Tüm v40 dosyaları ve SHA256 doğrulaması için: [v40 Stable Release](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v40)
+Tüm v41 dosyaları ve SHA256 doğrulaması için: [v41 Stable Release](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v41)
+
+## v41 öne çıkanlar
+
+- VK/VK Video erişilemez linklerinde uzun tekrar döngüsünü kesip sıradaki videoya geçme.
+- Video/ses ayrı parçaları indirildiğinde ek FFmpeg birleştirme/kurtarma akışı.
+- Tarayıcı çerezleri alanı artık ayrı ve görünür; **Brave** eklendi.
+- Varsayılan çerez seçimi **Otomatik (Brave öncelikli)**; sonra Chrome → Edge → Firefox.
+- Çoklu indirmede alt panelde net **Video X/Y** göstergesi ve toplam kuyruk yüzdesi.
+- v40'ın lazy kurulum ve ilk oturum update-metadata mantığı korunur.
 
 ## Hızlı kullanım
 
@@ -23,13 +32,14 @@ Tüm v40 dosyaları ve SHA256 doğrulaması için: [v40 Stable Release](https://
 
 Uygulama açılışta ağır bileşenleri topluca kurmaz. İlk oturumda yalnız güncelleme verilerini kontrol eder; Whisper, Chromium ve diğer büyük bileşenler gerektiğinde seçenek olarak sunulur.
 
-## v40 varsayılan indirme ayarları
+## Varsayılan indirme ayarları
 
 - Motor: **Auto+**
 - Kalite: **MP4 1080p**
 - Hız: **Hızlı**
 - Zorlayıcı mod: **Açık**
 - Adult/video-host uyum modu: **Açık**
+- Tarayıcı çerezleri: **Otomatik (Brave öncelikli)**
 
 > Yalnız erişim ve kullanım hakkın olan içeriklerde kullan. DRM, ödeme duvarı veya erişim kontrolünü aşmak için tasarlanmamıştır.
 
@@ -40,10 +50,6 @@ Uygulama açılışta ağır bileşenleri topluca kurmaz. İlk oturumda yalnız 
 - `chrome_capture_extension/` — yardımcı Chrome eklentisi
 - `.github/workflows/release.yml` — Windows EXE + ZIP oluşturur ve GitHub Release yayımlar
 - `docs/` — kısa kullanım ve test notları
-
-## Gereksinim
-
-Ana launcher, Windows üzerinde Python 3.11+ bulduğunda uygulamayı açar. Ağır Python paketleri yalnız ilgili özellik kullanıldığında hazırlanır.
 
 Ortak cache/runtime:
 

@@ -8,6 +8,7 @@ from importlib import metadata as importlib_metadata
 import site
 import re
 import shutil
+import queue
 import subprocess
 import sys
 import tempfile
@@ -23,8 +24,8 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-APP_NAME = "Chartshunter Media Studio v40"
-APP_VERSION = "v40"
+APP_NAME = "Chartshunter Media Studio v41"
+APP_VERSION = "v41"
 
 MEDIA_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
@@ -378,8 +379,70 @@ def is_fatal_download_error_text(text: str) -> bool:
         "http error 403",
         "certificate verify failed",
         "ssl: certificate_verify_failed",
+        "video is not available",
+        "this video is not available",
+        "video unavailable",
+        "this video is private",
+        "access denied",
+        "access to this video is denied",
+        "login required",
+        "requires login",
+        "sign in to confirm",
+        "not available in your country",
+        "not available in your region",
+        "content is unavailable",
     ]
     return any(token in low for token in fatal_tokens)
+
+
+def is_vk_url(url: str) -> bool:
+    """VK / VK Video alan adlarını güvenli biçimde tanır."""
+    try:
+        host = (urlparse(url).hostname or "").lower().strip(".")
+    except Exception:
+        host = ""
+    return host in {"vk.com", "www.vk.com", "m.vk.com", "vkvideo.ru", "www.vkvideo.ru"} or host.endswith(".vk.com") or host.endswith(".vkvideo.ru")
+
+
+COOKIE_BROWSER_AUTO = "Otomatik (Brave öncelikli)"
+COOKIE_BROWSER_CHOICES = [COOKIE_BROWSER_AUTO, "Brave", "Chrome", "Edge", "Firefox", "Yok"]
+
+
+def _browser_cookie_profile_exists(browser: str) -> bool:
+    """Standart Windows profil klasörlerinden tarayıcının kullanılmış olup olmadığını tahmin eder."""
+    browser = (browser or "").strip().lower()
+    env = os.environ
+    candidates: list[Path] = []
+    local = Path(env.get("LOCALAPPDATA", "")) if env.get("LOCALAPPDATA") else None
+    roaming = Path(env.get("APPDATA", "")) if env.get("APPDATA") else None
+
+    if browser == "brave" and local:
+        candidates.append(local / "BraveSoftware" / "Brave-Browser" / "User Data")
+    elif browser == "chrome" and local:
+        candidates.append(local / "Google" / "Chrome" / "User Data")
+    elif browser == "edge" and local:
+        candidates.append(local / "Microsoft" / "Edge" / "User Data")
+    elif browser == "firefox" and roaming:
+        candidates.append(roaming / "Mozilla" / "Firefox" / "Profiles")
+
+    return any(p.exists() for p in candidates)
+
+
+def resolve_cookie_browser_choice(choice: str) -> str | None:
+    """
+    GUI seçimini yt-dlp'nin beklediği tarayıcı adına çevirir.
+    Otomatik mod Brave -> Chrome -> Edge -> Firefox sırasıyla mevcut profili seçer.
+    """
+    raw = (choice or "").strip()
+    if not raw or raw == "Yok":
+        return None
+    if raw == COOKIE_BROWSER_AUTO:
+        for browser in ("brave", "chrome", "edge", "firefox"):
+            if _browser_cookie_profile_exists(browser):
+                return browser
+        return None
+    low = raw.lower()
+    return low if low in {"brave", "chrome", "edge", "firefox"} else None
 
 
 def stop_process_quietly(process: subprocess.Popen) -> None:
@@ -1318,6 +1381,7 @@ class App(tk.Tk):
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text = tk.StringVar(value="Hazır - %0")
         self.download_speed_text = tk.StringVar(value="İndirme hızı: -")
+        self.batch_progress_text = tk.StringVar(value="Video: -")
 
         self.progress_bar = ttk.Progressbar(
             progress_frame,
@@ -1333,8 +1397,13 @@ class App(tk.Tk):
             style="Danger.TButton"
         ).grid(row=0, column=1, sticky="e", padx=8, pady=(7, 3))
 
-        ttk.Label(progress_frame, textvariable=self.progress_text).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
-        ttk.Label(progress_frame, textvariable=self.download_speed_text).grid(row=1, column=1, sticky="e", padx=8, pady=(0, 6))
+        ttk.Label(
+            progress_frame,
+            textvariable=self.batch_progress_text,
+            font=("Segoe UI Semibold", 10),
+        ).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 2))
+        ttk.Label(progress_frame, textvariable=self.download_speed_text).grid(row=1, column=1, sticky="e", padx=8, pady=(2, 2))
+        ttk.Label(progress_frame, textvariable=self.progress_text).grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
 
         log_frame = ttk.LabelFrame(self.bottom_area, text="İşlem geçmişi - alt paneli yukarı/aşağı sürükleyebilirsin", style="Section.TLabelframe")
         log_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
@@ -1598,6 +1667,18 @@ class App(tk.Tk):
         def _update() -> None:
             self.download_speed_text.set(f"İndirme hızı: {display}")
 
+        self.after(0, _update)
+
+    def set_batch_progress(self, current: int | None = None, total: int | None = None, label: str | None = None) -> None:
+        """Çoklu indirmede hangi videonun işlendiğini ayrı ve belirgin gösterir."""
+        def _update() -> None:
+            if current and total:
+                text = f"Video {current}/{total}"
+                if label:
+                    text += f" • {label}"
+                self.batch_progress_text.set(text)
+            else:
+                self.batch_progress_text.set("Video: -")
         self.after(0, _update)
 
     def request_cancel(self) -> None:
@@ -3015,7 +3096,7 @@ class App(tk.Tk):
         self.dl_mode = tk.StringVar(value="MP4 1080p")
         self.dl_engine = tk.StringVar(value="Auto+: yt-dlp -> Cobalt -> gallery-dl -> streamlink -> direct")
         self.dl_speed_mode = tk.StringVar(value="Hızlı")
-        self.dl_cookies_browser = tk.StringVar(value="Yok")
+        self.dl_cookies_browser = tk.StringVar(value=COOKIE_BROWSER_AUTO)
         self.dl_cobalt_api_url = tk.StringVar(value="https://api.cobalt.tools")
         self.dl_cobalt_api_key = tk.StringVar(value="")
         self.dl_hard_mode = tk.BooleanVar(value=True)
@@ -3169,49 +3250,56 @@ class App(tk.Tk):
             width=15,
         ).grid(row=4, column=3, sticky="w", padx=8, pady=7)
 
-        ttk.Label(settings, text="Tarayıcı çerezleri").grid(row=5, column=0, sticky="w", padx=10, pady=7)
-        ttk.Combobox(
-            settings,
-            textvariable=self.dl_cookies_browser,
-            values=["Yok", "Chrome", "Edge", "Firefox"],
-            state="readonly",
-            width=22,
-        ).grid(row=5, column=1, sticky="w", padx=8, pady=7)
-        ttk.Label(
-            settings,
-            text="Giriş gerektiren ama erişim hakkın olan sayfalarda işe yarayabilir. DRM/koruma aşmaz.",
-            wraplength=480,
-        ).grid(row=5, column=2, columnspan=2, sticky="w", padx=8, pady=7)
-
-        ttk.Label(settings, text="Cobalt API").grid(row=6, column=0, sticky="w", padx=10, pady=7)
-        ttk.Entry(settings, textvariable=self.dl_cobalt_api_url).grid(row=6, column=1, sticky="ew", padx=8, pady=7)
-        ttk.Entry(settings, textvariable=self.dl_cobalt_api_key, show="*").grid(row=6, column=2, sticky="ew", padx=8, pady=7)
+        ttk.Label(settings, text="Cobalt API").grid(row=5, column=0, sticky="w", padx=10, pady=7)
+        ttk.Entry(settings, textvariable=self.dl_cobalt_api_url).grid(row=5, column=1, sticky="ew", padx=8, pady=7)
+        ttk.Entry(settings, textvariable=self.dl_cobalt_api_key, show="*").grid(row=5, column=2, sticky="ew", padx=8, pady=7)
         ttk.Label(
             settings,
             text="Cobalt ek fallback. API anahtarı gerekiyorsa sağ kutuya yaz. Boş kalırsa anahtarsız dener.",
             wraplength=300,
-        ).grid(row=6, column=3, sticky="w", padx=8, pady=7)
+        ).grid(row=5, column=3, sticky="w", padx=8, pady=7)
 
         ttk.Checkbutton(
             settings,
             text="Zorlayıcı mod: Chrome gibi davran + header/referer dene + ek fallback motorları kullan",
             variable=self.dl_hard_mode,
-        ).grid(row=7, column=1, columnspan=3, sticky="w", padx=8, pady=5)
+        ).grid(row=6, column=1, columnspan=3, sticky="w", padx=8, pady=5)
 
         ttk.Checkbutton(
             settings,
             text="Adult/video-host uyum modu: yaş/consent butonlarını dene + yt-dlp age/cookie/header ayarlarını güçlendir",
             variable=self.dl_adult_profile,
-        ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=5)
+        ).grid(row=7, column=1, columnspan=3, sticky="w", padx=8, pady=5)
 
         ttk.Checkbutton(
             settings,
             text="Playlist / seri linklerini de indir; hatalı videoyu atla, sonrakine geç",
             variable=self.dl_playlist,
-        ).grid(row=9, column=1, columnspan=3, sticky="w", padx=8, pady=7)
+        ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=7)
+
+        cookies_box = ttk.LabelFrame(f, text="2B) Tarayıcı çerezleri / oturum", style="Section.TLabelframe")
+        cookies_box.grid(row=4, column=0, sticky="ew", padx=12, pady=6)
+        cookies_box.columnconfigure(2, weight=1)
+        ttk.Label(
+            cookies_box,
+            text="Tarayıcı",
+            font=("Segoe UI Semibold", 10),
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=9)
+        ttk.Combobox(
+            cookies_box,
+            textvariable=self.dl_cookies_browser,
+            values=COOKIE_BROWSER_CHOICES,
+            state="readonly",
+            width=28,
+        ).grid(row=0, column=1, sticky="w", padx=8, pady=9)
+        ttk.Label(
+            cookies_box,
+            text="Varsayılan otomatik seçim Brave’i önceliklendirir; Brave profili yoksa Chrome → Edge → Firefox denenir. Yalnız kendi oturum/çerezlerin kullanılır.",
+            wraplength=650,
+        ).grid(row=0, column=2, sticky="w", padx=8, pady=9)
 
         action = ttk.Frame(f)
-        action.grid(row=4, column=0, sticky="ew", padx=12, pady=(6, 12))
+        action.grid(row=5, column=0, sticky="ew", padx=12, pady=(6, 12))
         action.columnconfigure(0, weight=1)
 
         ttk.Button(
@@ -3230,9 +3318,9 @@ class App(tk.Tk):
             "Not: Auto+ motor önce yt-dlp, sonra Cobalt API ve diğer açık kaynak fallbackleri dener. "
             "Zorlayıcı mod bazı skip-ad/referer isteyen sayfalarda şansı artırır; DRM, ödeme duvarı, özel hesap ve teknik koruma aşmaz. "
             "Çok Hızlı modu, aria2c kuruluysa yt-dlp altında harici çok bağlantılı indirici kullanır; "
-            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v40 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
+            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v41 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Tarayıcı çerezlerinde Brave öncelikli otomatik seçim kullanılır. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
         )
-        ttk.Label(f, text=note, wraplength=980).grid(row=5, column=0, sticky="w", padx=12, pady=(0, 10))
+        ttk.Label(f, text=note, wraplength=980).grid(row=6, column=0, sticky="w", padx=12, pady=(0, 10))
 
         self.dl_output_dir.trace_add("write", self.update_download_preview)
         self.dl_filename_base.trace_add("write", self.update_download_preview)
@@ -3248,6 +3336,7 @@ class App(tk.Tk):
             h = height_match.group(1)
             # MP4 uyumlu çıktı hedeflenir; ayrı video+ses gelirse FFmpeg MP4'e birleştirir.
             return (
+                f"bv*[height<={h}][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/"
                 f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/"
                 f"b[height<={h}][ext=mp4]/"
                 f"bv*[height<={h}]+ba/b[height<={h}]/best",
@@ -3255,7 +3344,11 @@ class App(tk.Tk):
             )
 
         if mode == "MP4 en iyi":
-            return "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best", "mp4"
+            return (
+                "bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/"
+                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
+                "mp4",
+            )
 
         return "bestvideo*+bestaudio/best", None
 
@@ -3376,7 +3469,8 @@ class App(tk.Tk):
         mode = self.dl_mode.get()
         engine_choice = self.dl_engine.get()
         speed_mode = self.dl_speed_mode.get()
-        cookies_browser = self.dl_cookies_browser.get()
+        cookies_browser_choice = self.dl_cookies_browser.get()
+        cookies_browser = resolve_cookie_browser_choice(cookies_browser_choice)
         hard_mode = bool(self.dl_hard_mode.get())
         adult_profile = bool(getattr(self, "dl_adult_profile", tk.BooleanVar(value=True)).get())
         adult_detected = has_adult_video_host_url(download_items)
@@ -3395,12 +3489,15 @@ class App(tk.Tk):
         self.after(0, self.update_download_preview)
 
         self.log(f"Link indirme başladı. Link sayısı: {len(download_items)} | Tür: {mode}")
-        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez: {cookies_browser} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        cookie_display = cookies_browser.title() if cookies_browser else "Yok"
+        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez seçimi: {cookies_browser_choice} -> {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        if cookies_browser_choice == COOKIE_BROWSER_AUTO and not cookies_browser:
+            self.log("Tarayıcı çerezi otomatik seçiminde kullanılabilir profil bulunamadı; çerezsiz devam edilecek.")
         self.log(f"Cobalt API: {self.dl_cobalt_api_url.get().strip() or 'Kapalı'}")
         if adult_detected:
             self.log("Adult/video-host alan adı algılandı. Uyum profili aktif: age-limit/header/referer/consent yakalama ayarları güçlendirilecek.")
-            if cookies_browser == "Yok":
-                self.log("Not: Bazı yetişkin video sitelerinde yaş/giriş onayı için Chrome/Edge çerezleri seçmek gerekebilir.")
+            if not cookies_browser:
+                self.log("Not: Bazı sitelerde yaş/giriş onayı için Brave/Chrome/Edge/Firefox oturum çerezleri gerekebilir.")
         if speed_mode == "Çok Hızlı (aria2c varsa)":
             if not shutil.which("aria2c"):
                 self._ensure_system_tool("aria2c", "aria2.aria2", "aria2c hızlandırıcı", required=False)
@@ -3439,7 +3536,7 @@ class App(tk.Tk):
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/121.0.0.0 Safari/537.36"
         )
-        current_link_context = {"referer": None}
+        current_link_context = {"referer": None, "index": 0, "total": total_urls, "label": ""}
 
         def current_referer(default_url: str) -> str:
             return str(current_link_context.get("referer") or default_url)
@@ -3450,6 +3547,21 @@ class App(tk.Tk):
         def current_hard_mode(url: str) -> bool:
             # Adult/video-host profili açıksa hard davranışı otomatik kullanılır.
             return bool(hard_mode or current_adult_profile(url))
+
+        def progress_prefix() -> str:
+            idx = int(current_link_context.get("index") or 0)
+            total = int(current_link_context.get("total") or total_urls)
+            return f"Video {idx}/{total}" if idx > 0 else "Video"
+
+        def overall_download_percent(file_percent: float) -> float:
+            idx = max(1, int(current_link_context.get("index") or 1))
+            total = max(1, int(current_link_context.get("total") or total_urls))
+            local = max(0.0, min(100.0, float(file_percent)))
+            return ((idx - 1) + local / 100.0) / total * 100.0
+
+        def engine_timeout(url: str, normal: float = 180.0) -> float:
+            # VK erişilemez linklerde motor zincirinin dakikalarca takılmasını engeller.
+            return 75.0 if is_vk_url(url) else normal
 
         def existing_files_snapshot() -> set[Path]:
             try:
@@ -3479,6 +3591,10 @@ class App(tk.Tk):
                 return None
 
         def run_process_capture(args: list[str], timeout: float | None = None) -> tuple[bool, str]:
+            """
+            CLI motorlarını çıktı gelmese bile gerçek zaman aşımıyla durdurur.
+            Eski readline() akışı bazı VK/host hatalarında satır üretmeyip uzun süre bekleyebiliyordu.
+            """
             process = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
@@ -3486,52 +3602,187 @@ class App(tk.Tk):
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
+                bufsize=1,
                 **subprocess_hidden_kwargs(),
             )
             output_lines: list[str] = []
             start_time = time.time()
             last_log = 0.0
+            line_queue: queue.Queue = queue.Queue()
+
+            def _reader() -> None:
+                try:
+                    if process.stdout is not None:
+                        for line in iter(process.stdout.readline, ""):
+                            line_queue.put(line)
+                finally:
+                    line_queue.put(None)
+
+            threading.Thread(target=_reader, daemon=True).start()
+
             try:
+                reader_done = False
                 while True:
                     if self.is_cancelled():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
+                        stop_process_quietly(process)
                         raise UserCancelled("İndirme kullanıcı tarafından iptal edildi.")
 
                     if timeout is not None and time.time() - start_time > timeout:
-                        process.terminate()
-                        return False, "Zaman aşımı"
+                        stop_process_quietly(process)
+                        msg = f"Zaman aşımı ({int(timeout)} sn)"
+                        self.log(msg + "; sıradaki motor/link denenecek.")
+                        return False, msg
 
-                    line = process.stdout.readline() if process.stdout is not None else ""
-                    if line:
+                    try:
+                        line = line_queue.get(timeout=0.20)
+                    except queue.Empty:
+                        line = ""
+
+                    if line is None:
+                        reader_done = True
+                    elif line:
                         clean = line.strip()
-                        output_lines.append(clean)
+                        if clean:
+                            output_lines.append(clean)
+                            if is_fatal_download_error_text(clean):
+                                stop_process_quietly(process)
+                                raise FatalDownloadError(clean)
 
-                        # Net DNS/URL açma hatalarında aynı denemeyi uzatmadan kes.
-                        # Örn: Unable to open URL / Max retries exceeded / NameResolutionError
-                        if is_fatal_download_error_text(clean):
-                            stop_process_quietly(process)
-                            raise FatalDownloadError(clean)
+                            speed_text = extract_speed_from_line(clean)
+                            if speed_text:
+                                self.set_download_speed(speed_text)
 
-                        speed_text = extract_speed_from_line(clean)
-                        if speed_text:
-                            self.set_download_speed(speed_text)
+                            if time.time() - last_log >= 8:
+                                self.log(clean[:220])
+                                last_log = time.time()
 
-                        if time.time() - last_log >= 8 and clean:
-                            self.log(clean[:220])
-                            last_log = time.time()
-                    elif process.poll() is not None:
+                    if process.poll() is not None and (reader_done or line_queue.empty()):
                         break
-                    else:
-                        time.sleep(0.1)
 
                 return process.returncode == 0, "\n".join(output_lines[-80:])
             finally:
-                if process.poll() is None and self.is_cancelled():
-                    process.terminate()
+                if process.poll() is None:
+                    stop_process_quietly(process)
+
+        def is_intermediate_download_file(path: Path) -> bool:
+            low = path.name.lower()
+            return (
+                low.endswith((".part", ".ytdl", ".temp", ".tmp"))
+                or bool(re.search(r"\.f\d+\.[^.]+$", low))
+                or ".part-" in low
+            )
+
+        def complete_media_files(paths: list[Path]) -> list[Path]:
+            result: list[Path] = []
+            for path in paths:
+                try:
+                    if (
+                        path.is_file()
+                        and path.stat().st_size > 0
+                        and path.suffix.lower() in MEDIA_EXTENSIONS
+                        and not is_intermediate_download_file(path)
+                    ):
+                        result.append(path)
+                except Exception:
+                    continue
+            return result
+
+        def probe_stream_types(path: Path) -> set[str]:
+            ffprobe = shutil.which("ffprobe")
+            if not ffprobe:
+                return set()
+            try:
+                cp = subprocess.run(
+                    [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", str(path)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    timeout=15,
+                    **subprocess_hidden_kwargs(),
+                )
+                data = json.loads(cp.stdout or "{}") if cp.returncode == 0 else {}
+                return {
+                    str(item.get("codec_type") or "").lower()
+                    for item in data.get("streams", [])
+                    if isinstance(item, dict)
+                }
+            except Exception:
+                return set()
+
+        def recover_split_media_parts(before: set[Path]) -> Path | None:
+            """
+            yt-dlp video ve sesi indirmiş ama FFmpeg birleşimi yarıda kalmışsa
+            .fXXX video/ses parçalarını tek MP4 olarak toparlamayı dener.
+            """
+            created = new_files_since(before)
+            part_files = [
+                p for p in created
+                if p.suffix.lower() in MEDIA_EXTENSIONS and is_intermediate_download_file(p)
+            ]
+            if len(part_files) < 2:
+                return None
+            if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                return None
+
+            groups: dict[str, list[Path]] = {}
+            for path in part_files:
+                base = re.sub(r"\.f\d+$", "", path.stem, flags=re.IGNORECASE)
+                groups.setdefault(base, []).append(path)
+
+            for base, files in groups.items():
+                typed = [(p, probe_stream_types(p)) for p in files]
+                video = next((p for p, kinds in typed if "video" in kinds), None)
+                audio = next((p for p, kinds in typed if "audio" in kinds and "video" not in kinds), None)
+                if video is None or audio is None:
+                    continue
+
+                target = output_dir / f"{base}.mp4"
+                if target.exists():
+                    target = make_final_path(".mp4")
+
+                attempts = [
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+                        "-movflags", "+faststart", str(target),
+                    ],
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(target),
+                    ],
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
+                        "-b:a", "192k", "-movflags", "+faststart", str(target),
+                    ],
+                ]
+
+                for attempt_no, args in enumerate(attempts, start=1):
+                    try:
+                        self.set_progress(overall_download_percent(94), f"{progress_prefix()} • parçalar birleştiriliyor ({attempt_no}/3)")
+                        self.set_download_speed("birleştiriliyor")
+                        run_ffmpeg(args, self.cancel_event)
+                        if target.exists() and target.stat().st_size > 0:
+                            self.log(f"Parça kurtarma başarılı: {target.name}")
+                            for part in files:
+                                try:
+                                    part.unlink(missing_ok=True)
+                                except Exception:
+                                    pass
+                            return target
+                    except UserCancelled:
+                        raise
+                    except Exception as e:
+                        self.log(f"Parça birleştirme denemesi {attempt_no}/3 başarısız: {str(e)[:220]}")
+                        try:
+                            target.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
+            return None
 
         def try_ytdlp(url: str) -> bool:
             if not self._ensure_python_component("yt_dlp", "yt-dlp indirme motoru", ["yt-dlp"], ["yt_dlp"], weekly_update=True):
@@ -3546,6 +3797,18 @@ class App(tk.Tk):
             before = existing_files_snapshot()
             last_log_time = 0.0
             last_speed_sample = {"time": time.time(), "bytes": 0.0}
+            ydl_errors: list[str] = []
+
+            class _YDLLogger:
+                def debug(_self, msg):
+                    return None
+                def info(_self, msg):
+                    return None
+                def warning(_self, msg):
+                    if is_fatal_download_error_text(str(msg)):
+                        ydl_errors.append(str(msg))
+                def error(_self, msg):
+                    ydl_errors.append(str(msg))
 
             autonumber_start = next_number_index(output_dir, safe_base) if safe_base else 1
             if safe_base:
@@ -3565,7 +3828,7 @@ class App(tk.Tk):
                     downloaded = float(d.get("downloaded_bytes") or 0)
                     total = float(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
                     file_percent = max(0.0, min(100.0, downloaded / total * 100)) if total > 0 else 0.0
-                    self.set_progress(file_percent, f"yt-dlp indiriyor | Dosya %{file_percent:.1f}")
+                    self.set_progress(overall_download_percent(file_percent), f"{progress_prefix()} • yt-dlp | dosya %{file_percent:.1f}")
 
                     if current_time - last_log_time >= 5:
                         extra = "boyut bilinmiyor"
@@ -3600,7 +3863,7 @@ class App(tk.Tk):
 
                 elif status == "finished":
                     filename = d.get("filename") or "dosya"
-                    self.set_progress(90, "İndirme bitti, dönüştürme/birleştirme")
+                    self.set_progress(overall_download_percent(90), f"{progress_prefix()} • indirme bitti, dönüştürme/birleştirme")
                     self.set_download_speed("işleniyor")
                     self.log(f"yt-dlp indirme tamamlandı, işleniyor: {Path(filename).name}")
 
@@ -3609,7 +3872,8 @@ class App(tk.Tk):
                 "windowsfilenames": True,
                 "noplaylist": not allow_playlist,
                 "progress_hooks": [_hook],
-                "ignoreerrors": True,
+                "logger": _YDLLogger(),
+                "ignoreerrors": bool(allow_playlist),
                 "continuedl": True,
                 "skip_unavailable_fragments": True,
                 "autonumber_start": autonumber_start,
@@ -3617,8 +3881,27 @@ class App(tk.Tk):
                 "restrictfilenames": False,
                 "verbose": False,
                 "format": format_string,
+                "socket_timeout": 20,
                 **self._yt_dlp_speed_opts(),
             }
+
+            # VK erişilemez/private linklerde uzun retry zinciri yerine hızla sıradaki videoya geç.
+            if is_vk_url(url):
+                ydl_opts.update({
+                    "socket_timeout": 15,
+                    "retries": 2,
+                    "fragment_retries": 3,
+                    "extractor_retries": 1,
+                    "file_access_retries": 1,
+                })
+
+            if merge_format or is_mp3_download_mode(mode):
+                if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                    self.log("FFmpeg hazırlanamadığı için video/ses parçaları birleştirilemedi.")
+                    return False
+                ffmpeg_bin = shutil.which("ffmpeg")
+                if ffmpeg_bin:
+                    ydl_opts["ffmpeg_location"] = str(Path(ffmpeg_bin).parent)
 
             if merge_format:
                 ydl_opts["merge_output_format"] = merge_format
@@ -3652,24 +3935,45 @@ class App(tk.Tk):
                     "Referer": current_referer(url),
                 }
 
-            if cookies_browser != "Yok":
-                browser = cookies_browser.lower()
-                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser}")
-                ydl_opts["cookiesfrombrowser"] = (browser,)
+            if cookies_browser:
+                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser.title()}")
+                ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    result = ydl.download([url])
+                    ydl.download([url])
+
                 created = new_files_since(before)
-                if created:
-                    for f in created[:10]:
+                finals = complete_media_files(created)
+                if finals:
+                    for f in finals[:10]:
                         self.log(f"Yeni dosya: {f.name}")
-                return result == 0 or bool(created)
+                    return True
+
+                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                if fatal_msg:
+                    raise FatalDownloadError(fatal_msg)
+
+                recovered = recover_split_media_parts(before)
+                if recovered is not None:
+                    return True
+
+                if created:
+                    self.log("yt-dlp dosya/parça üretti ancak tamamlanmış medya bulunamadı; fallback motora geçiliyor.")
+                return False
             except UserCancelled:
                 raise
+            except FatalDownloadError:
+                raise
             except Exception as e:
-                if is_fatal_download_error_text(str(e)):
-                    raise FatalDownloadError(str(e))
+                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                if fatal_msg or is_fatal_download_error_text(str(e)):
+                    raise FatalDownloadError(fatal_msg or str(e))
+
+                recovered = recover_split_media_parts(before)
+                if recovered is not None:
+                    return True
+
                 self.log(f"yt-dlp başarısız: {e}")
                 return False
 
@@ -3695,15 +3999,23 @@ class App(tk.Tk):
             else:
                 outtmpl = str(output_dir / "%(title).160B [%(id)s].%(ext)s")
 
+            if merge_format or is_mp3_download_mode(mode):
+                if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                    return False
+
             args = python_module_or_exe("yt_dlp", "yt-dlp")
-            args += ["--ignore-errors", "--continue", "--no-overwrites", "--windows-filenames"]
+            args += ["--continue", "--no-overwrites", "--windows-filenames", "--socket-timeout", "20"]
+            if allow_playlist:
+                args += ["--ignore-errors"]
+            if is_vk_url(url):
+                args += ["--retries", "2", "--fragment-retries", "3", "--extractor-retries", "1"]
             if safe_base:
                 args += ["--autonumber-start", str(autonumber_start)]
             args += ["--no-playlist"] if not allow_playlist else ["--yes-playlist"]
             args += ["-f", format_string, "-o", outtmpl]
 
             if merge_format:
-                args += ["--merge-output-format", merge_format]
+                args += ["--merge-output-format", merge_format, "--remux-video", "mp4"]
             if is_mp3_download_mode(mode):
                 args += ["-x", "--audio-format", "mp3", "--audio-quality", f"{mp3_quality_for_mode(mode)}K"]
 
@@ -3730,19 +4042,27 @@ class App(tk.Tk):
             if current_adult_profile(url):
                 args += ["--age-limit", "18", "--geo-bypass"]
 
-            if cookies_browser != "Yok":
-                args += ["--cookies-from-browser", cookies_browser.lower()]
+            if cookies_browser:
+                args += ["--cookies-from-browser", cookies_browser]
 
             args.append(url)
 
-            ok, out = run_process_capture(args)
+            ok, out = run_process_capture(args, timeout=engine_timeout(url, 240.0))
             created = new_files_since(before)
-            if created:
-                for f in created[:10]:
+            finals = complete_media_files(created)
+            if finals:
+                for f in finals[:10]:
                     self.log(f"yt-dlp zorlayıcı yeni dosya: {f.name}")
                 return True
+
+            recovered = recover_split_media_parts(before)
+            if recovered is not None:
+                return True
+
             if not ok:
                 self.log(f"yt-dlp zorlayıcı başarısız: {out[-700:] if out else 'çıktı yok'}")
+            elif created:
+                self.log("yt-dlp zorlayıcı parça üretti ancak final medya oluşmadı; sıradaki motora geçiliyor.")
             return False
 
         def try_cobalt_api(url: str) -> bool:
@@ -3900,7 +4220,7 @@ class App(tk.Tk):
                                 now = time.time()
                                 if total > 0:
                                     pct = downloaded / total * 100
-                                    self.set_progress(pct, f"Cobalt indiriyor | Dosya %{pct:.1f}")
+                                    self.set_progress(overall_download_percent(pct), f"{progress_prefix()} • Cobalt | dosya %{pct:.1f}")
                                 if now - last_log >= 5:
                                     dt = max(0.1, now - started)
                                     self.set_download_speed(format_download_speed(downloaded / dt))
@@ -3934,7 +4254,7 @@ class App(tk.Tk):
                     args += ["--playlist"]
                 args.append(url)
 
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 150.0))
                 if not ok:
                     self.log(f"you-get başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -3980,7 +4300,7 @@ class App(tk.Tk):
             with tempfile.TemporaryDirectory() as td:
                 tmp = Path(td)
                 args = python_module_or_exe("gallery_dl", "gallery-dl") + ["-D", str(tmp), url]
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 150.0))
                 if not ok:
                     self.log(f"gallery-dl başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -4028,11 +4348,12 @@ class App(tk.Tk):
                     return False
                 temp_out = output_dir / f"_temp_streamlink_{int(time.time())}.ts"
                 quality = quality_to_streamlink(mode)
-                args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", "3"]
+                stream_retries = "1" if is_vk_url(url) else "3"
+                args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", stream_retries]
                 if current_hard_mode(url):
                     args += ["--http-header", f"Referer={current_referer(url)}", "--http-header", f"User-Agent={browser_user_agent}"]
                 args += ["-o", str(temp_out), url, quality]
-                ok, out = run_process_capture(args)
+                ok, out = run_process_capture(args, timeout=engine_timeout(url, 180.0))
                 if not ok or not temp_out.exists():
                     self.log(f"streamlink başarısız: {out[-500:] if out else 'çıktı yok'}")
                     return False
@@ -4048,11 +4369,12 @@ class App(tk.Tk):
 
             out = make_final_path(".mp4")
             quality = quality_to_streamlink(mode)
-            args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", "3"]
+            stream_retries = "1" if is_vk_url(url) else "3"
+            args = python_module_or_exe("streamlink", "streamlink") + ["--force", "--retry-streams", stream_retries]
             if current_hard_mode(url):
                 args += ["--http-header", f"Referer={current_referer(url)}", "--http-header", f"User-Agent={browser_user_agent}"]
             args += ["-o", str(out), url, quality]
-            ok, out_text = run_process_capture(args)
+            ok, out_text = run_process_capture(args, timeout=engine_timeout(url, 180.0))
             if ok and out.exists() and out.stat().st_size > 0:
                 self.log(f"streamlink kaydedildi: {out.name}")
                 return True
@@ -4069,6 +4391,9 @@ class App(tk.Tk):
             if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
                 return False
             if not is_probable_direct_media_url(url):
+                if is_vk_url(url):
+                    self.log("VK sayfa URL'si direct FFmpeg girdisi değil; bu motor beklemeden atlandı.")
+                    return False
                 self.log("Bu link doğrudan medya/m3u8/mpd gibi görünmüyor; FFmpeg denemesi yine yapılacak.")
 
             ffmpeg_headers = (
@@ -4077,13 +4402,14 @@ class App(tk.Tk):
                 "Accept-Language: tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7\r\n"
             )
             header_args = ["-headers", ffmpeg_headers] if current_hard_mode(url) else []
+            network_timeout_args = ["-rw_timeout", "20000000"] if url.lower().startswith(("http://", "https://")) else []
 
             if is_mp3_download_mode(mode):
                 out = make_final_path(".mp3")
-                args = ["ffmpeg", "-y", *header_args, "-i", url, "-vn", "-codec:a", "libmp3lame", "-b:a", f"{mp3_quality_for_mode(mode)}k", str(out)]
+                args = ["ffmpeg", "-y", *network_timeout_args, *header_args, "-i", url, "-vn", "-codec:a", "libmp3lame", "-b:a", f"{mp3_quality_for_mode(mode)}k", str(out)]
             else:
                 out = make_final_path(".mp4")
-                args = ["ffmpeg", "-y", *header_args, "-i", url, "-c", "copy", str(out)]
+                args = ["ffmpeg", "-y", *network_timeout_args, *header_args, "-i", url, "-c", "copy", str(out)]
             try:
                 run_ffmpeg(args, self.cancel_event)
                 if out.exists() and out.stat().st_size > 0:
@@ -4134,6 +4460,12 @@ class App(tk.Tk):
                 line_name = str(item.get("name") or "").strip()
                 link_referer = str(item.get("referer") or "").strip() or None
                 current_link_context["referer"] = link_referer
+                current_link_context["index"] = url_index
+                current_link_context["total"] = total_urls
+                host_label = (urlparse(url).hostname or "").replace("www.", "")
+                display_label = line_name or host_label or "video"
+                current_link_context["label"] = display_label
+                self.set_batch_progress(url_index, total_urls, display_label[:46])
 
                 # Link grup/başlık adıyla eşleştiyse o ad mutlak önceliklidir.
                 # Dosya adı kökü kutusu bu senaryoda yok sayılır.
@@ -4153,8 +4485,8 @@ class App(tk.Tk):
                 output_dir.mkdir(parents=True, exist_ok=True)
 
                 base_percent = (url_index - 1) / total_urls * 100
-                self.set_progress(base_percent, f"Link {url_index}/{total_urls} başlıyor")
-                self.log(f"Link işleniyor {url_index}/{total_urls}: {url}")
+                self.set_progress(base_percent, f"Video {url_index}/{total_urls} başlıyor")
+                self.log(f"Video işleniyor {url_index}/{total_urls}: {url}")
                 if link_referer:
                     self.log(f"Kaynak sayfa/referer kullanılacak: {link_referer}")
                 if line_name:
@@ -4200,9 +4532,10 @@ class App(tk.Tk):
                     else:
                         self.log("UYARI: Bu link hiçbir motorla indirilemedi, sıradakine geçiliyor.")
 
-                self.set_progress(url_index / total_urls * 100, f"Link {url_index}/{total_urls} tamam")
+                self.set_progress(url_index / total_urls * 100, f"Video {url_index}/{total_urls} tamam")
 
-            self.set_progress(100, "Link indirme işlemi bitti")
+            self.set_progress(100, f"İndirme bitti • {success_count}/{total_urls} başarılı")
+            self.set_batch_progress(total_urls, total_urls, "tamamlandı")
             self.set_download_speed("-")
             if failed_links:
                 try:
@@ -4216,8 +4549,10 @@ class App(tk.Tk):
 
         except UserCancelled:
             self.set_progress(self.progress_var.get(), "İndirme iptal edildi")
+            self.set_batch_progress()
             self.log("İndirme kullanıcı tarafından iptal edildi.")
         except Exception as e:
+            self.set_batch_progress()
             self.log(f"HATA: Link indirme başarısız: {e}")
             self.log("Not: Her site desteklenmez; DRM/ödeme duvarı/özel hesap/teknik koruma aşılmaz.")
 

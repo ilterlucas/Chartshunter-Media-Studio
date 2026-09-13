@@ -1,0 +1,54 @@
+name: v41 Development Test
+
+on:
+  push:
+    branches:
+      - v41-dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Compile Python
+        shell: pwsh
+        run: |
+          python -m py_compile src\app.py src\bootstrap.py src\maintenance.py src\self_test.py
+
+      - name: Run v41 self tests
+        shell: pwsh
+        run: |
+          python src\self_test.py
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Build Windows launchers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-build | Out-Null
+          Push-Location launcher
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\test-build\Chartshunter Media Studio.exe" main.go
+          go build -trimpath -ldflags "-H windowsgui -s -w" -o "..\test-build\Repair & Update.exe" repair.go
+          Pop-Location
+
+      - name: Verify launcher outputs
+        shell: pwsh
+        run: |
+          if (!(Test-Path "test-build\Chartshunter Media Studio.exe")) { throw "Main EXE missing" }
+          if (!(Test-Path "test-build\Repair & Update.exe")) { throw "Repair EXE missing" }
+          Get-Item "test-build\Chartshunter Media Studio.exe", "test-build\Repair & Update.exe" | Select-Object Name,Length
