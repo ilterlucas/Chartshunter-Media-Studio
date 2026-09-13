@@ -2,25 +2,24 @@
 
 Chartshunter Media Studio Stable sürümleri GitHub Actions ile otomatik paketlenir.
 
-## v40 düzeni
+## Stable yayın akışı
 
 `.github/workflows/release.yml`:
 
-1. Python kaynaklarını syntax/compile kontrolünden geçirir.
-2. Go tabanlı Windows GUI launcher'larını derler.
-3. Windows dağıtım klasörünü hazırlar.
-4. SHA256 doğrulama dosyasını üretir.
-5. ZIP paketini oluşturur.
-6. Workflow artifact'ını yükler.
-7. `v40` GitHub Release'ını oluşturur veya mevcut asset'leri günceller.
+1. Python kaynaklarını compile kontrolünden geçirir.
+2. `src/self_test.py` regresyon testlerini çalıştırır.
+3. Go tabanlı Windows GUI launcher'larını derler.
+4. Windows dağıtım klasörünü hazırlar.
+5. SHA256 doğrulama dosyasını üretir.
+6. ZIP paketini oluşturur.
+7. Workflow artifact'ını yükler.
+8. Stable GitHub Release'ını oluşturur veya günceller.
 
-Release asset'leri:
+v41 release asset'leri:
 
-- `ChartshunterMediaStudio_v40_Stable.zip`
+- `ChartshunterMediaStudio_v41_Stable.zip`
 - `Chartshunter.Media.Studio.exe`
 - `Repair.Update.exe`
 - `SHA256SUMS.txt`
 
-## Sonraki stable sürüm
-
-Yeni stable sürümde uygulama sürümü, `BUILD_INFO.json`, `CHANGELOG.md` ve workflow içindeki release/tag adları birlikte güncellenmelidir. Kaynak değişiklikleri önce test edilmeli; stable tag/release yalnız doğrulama tamamlandıktan sonra yayınlanmalıdır.
+Yeni stable sürümde APP_VERSION, BUILD_INFO, CHANGELOG, test raporu ve workflow içindeki tag/release adları birlikte güncellenmelidir.
