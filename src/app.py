@@ -8,6 +8,7 @@ from importlib import metadata as importlib_metadata
 import site
 import re
 import shutil
+import queue
 import subprocess
 import sys
 import tempfile
@@ -23,8 +24,8 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-APP_NAME = "Chartshunter Media Studio v40"
-APP_VERSION = "v40"
+APP_NAME = "Chartshunter Media Studio v41"
+APP_VERSION = "v41"
 
 MEDIA_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
@@ -378,8 +379,70 @@ def is_fatal_download_error_text(text: str) -> bool:
         "http error 403",
         "certificate verify failed",
         "ssl: certificate_verify_failed",
+        "video is not available",
+        "this video is not available",
+        "video unavailable",
+        "this video is private",
+        "access denied",
+        "access to this video is denied",
+        "login required",
+        "requires login",
+        "sign in to confirm",
+        "not available in your country",
+        "not available in your region",
+        "content is unavailable",
     ]
     return any(token in low for token in fatal_tokens)
+
+
+def is_vk_url(url: str) -> bool:
+    """VK / VK Video alan adlarını güvenli biçimde tanır."""
+    try:
+        host = (urlparse(url).hostname or "").lower().strip(".")
+    except Exception:
+        host = ""
+    return host in {"vk.com", "www.vk.com", "m.vk.com", "vkvideo.ru", "www.vkvideo.ru"} or host.endswith(".vk.com") or host.endswith(".vkvideo.ru")
+
+
+COOKIE_BROWSER_AUTO = "Otomatik (Brave öncelikli)"
+COOKIE_BROWSER_CHOICES = [COOKIE_BROWSER_AUTO, "Brave", "Chrome", "Edge", "Firefox", "Yok"]
+
+
+def _browser_cookie_profile_exists(browser: str) -> bool:
+    """Standart Windows profil klasörlerinden tarayıcının kullanılmış olup olmadığını tahmin eder."""
+    browser = (browser or "").strip().lower()
+    env = os.environ
+    candidates: list[Path] = []
+    local = Path(env.get("LOCALAPPDATA", "")) if env.get("LOCALAPPDATA") else None
+    roaming = Path(env.get("APPDATA", "")) if env.get("APPDATA") else None
+
+    if browser == "brave" and local:
+        candidates.append(local / "BraveSoftware" / "Brave-Browser" / "User Data")
+    elif browser == "chrome" and local:
+        candidates.append(local / "Google" / "Chrome" / "User Data")
+    elif browser == "edge" and local:
+        candidates.append(local / "Microsoft" / "Edge" / "User Data")
+    elif browser == "firefox" and roaming:
+        candidates.append(roaming / "Mozilla" / "Firefox" / "Profiles")
+
+    return any(p.exists() for p in candidates)
+
+
+def resolve_cookie_browser_choice(choice: str) -> str | None:
+    """
+    GUI seçimini yt-dlp'nin beklediği tarayıcı adına çevirir.
+    Otomatik mod Brave -> Chrome -> Edge -> Firefox sırasıyla mevcut profili seçer.
+    """
+    raw = (choice or "").strip()
+    if not raw or raw == "Yok":
+        return None
+    if raw == COOKIE_BROWSER_AUTO:
+        for browser in ("brave", "chrome", "edge", "firefox"):
+            if _browser_cookie_profile_exists(browser):
+                return browser
+        return None
+    low = raw.lower()
+    return low if low in {"brave", "chrome", "edge", "firefox"} else None
 
 
 def stop_process_quietly(process: subprocess.Popen) -> None:
@@ -1318,6 +1381,7 @@ class App(tk.Tk):
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text = tk.StringVar(value="Hazır - %0")
         self.download_speed_text = tk.StringVar(value="İndirme hızı: -")
+        self.batch_progress_text = tk.StringVar(value="Video: -")
 
         self.progress_bar = ttk.Progressbar(
             progress_frame,
@@ -1333,8 +1397,13 @@ class App(tk.Tk):
             style="Danger.TButton"
         ).grid(row=0, column=1, sticky="e", padx=8, pady=(7, 3))
 
-        ttk.Label(progress_frame, textvariable=self.progress_text).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
-        ttk.Label(progress_frame, textvariable=self.download_speed_text).grid(row=1, column=1, sticky="e", padx=8, pady=(0, 6))
+        ttk.Label(
+            progress_frame,
+            textvariable=self.batch_progress_text,
+            font=("Segoe UI Semibold", 10),
+        ).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 2))
+        ttk.Label(progress_frame, textvariable=self.download_speed_text).grid(row=1, column=1, sticky="e", padx=8, pady=(2, 2))
+        ttk.Label(progress_frame, textvariable=self.progress_text).grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
 
         log_frame = ttk.LabelFrame(self.bottom_area, text="İşlem geçmişi - alt paneli yukarı/aşağı sürükleyebilirsin", style="Section.TLabelframe")
         log_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
@@ -1598,6 +1667,18 @@ class App(tk.Tk):
         def _update() -> None:
             self.download_speed_text.set(f"İndirme hızı: {display}")
 
+        self.after(0, _update)
+
+    def set_batch_progress(self, current: int | None = None, total: int | None = None, label: str | None = None) -> None:
+        """Çoklu indirmede hangi videonun işlendiğini ayrı ve belirgin gösterir."""
+        def _update() -> None:
+            if current and total:
+                text = f"Video {current}/{total}"
+                if label:
+                    text += f" • {label}"
+                self.batch_progress_text.set(text)
+            else:
+                self.batch_progress_text.set("Video: -")
         self.after(0, _update)
 
     def request_cancel(self) -> None:
@@ -3015,7 +3096,7 @@ class App(tk.Tk):
         self.dl_mode = tk.StringVar(value="MP4 1080p")
         self.dl_engine = tk.StringVar(value="Auto+: yt-dlp -> Cobalt -> gallery-dl -> streamlink -> direct")
         self.dl_speed_mode = tk.StringVar(value="Hızlı")
-        self.dl_cookies_browser = tk.StringVar(value="Yok")
+        self.dl_cookies_browser = tk.StringVar(value=COOKIE_BROWSER_AUTO)
         self.dl_cobalt_api_url = tk.StringVar(value="https://api.cobalt.tools")
         self.dl_cobalt_api_key = tk.StringVar(value="")
         self.dl_hard_mode = tk.BooleanVar(value=True)
@@ -3169,49 +3250,56 @@ class App(tk.Tk):
             width=15,
         ).grid(row=4, column=3, sticky="w", padx=8, pady=7)
 
-        ttk.Label(settings, text="Tarayıcı çerezleri").grid(row=5, column=0, sticky="w", padx=10, pady=7)
-        ttk.Combobox(
-            settings,
-            textvariable=self.dl_cookies_browser,
-            values=["Yok", "Chrome", "Edge", "Firefox"],
-            state="readonly",
-            width=22,
-        ).grid(row=5, column=1, sticky="w", padx=8, pady=7)
-        ttk.Label(
-            settings,
-            text="Giriş gerektiren ama erişim hakkın olan sayfalarda işe yarayabilir. DRM/koruma aşmaz.",
-            wraplength=480,
-        ).grid(row=5, column=2, columnspan=2, sticky="w", padx=8, pady=7)
-
-        ttk.Label(settings, text="Cobalt API").grid(row=6, column=0, sticky="w", padx=10, pady=7)
-        ttk.Entry(settings, textvariable=self.dl_cobalt_api_url).grid(row=6, column=1, sticky="ew", padx=8, pady=7)
-        ttk.Entry(settings, textvariable=self.dl_cobalt_api_key, show="*").grid(row=6, column=2, sticky="ew", padx=8, pady=7)
+        ttk.Label(settings, text="Cobalt API").grid(row=5, column=0, sticky="w", padx=10, pady=7)
+        ttk.Entry(settings, textvariable=self.dl_cobalt_api_url).grid(row=5, column=1, sticky="ew", padx=8, pady=7)
+        ttk.Entry(settings, textvariable=self.dl_cobalt_api_key, show="*").grid(row=5, column=2, sticky="ew", padx=8, pady=7)
         ttk.Label(
             settings,
             text="Cobalt ek fallback. API anahtarı gerekiyorsa sağ kutuya yaz. Boş kalırsa anahtarsız dener.",
             wraplength=300,
-        ).grid(row=6, column=3, sticky="w", padx=8, pady=7)
+        ).grid(row=5, column=3, sticky="w", padx=8, pady=7)
 
         ttk.Checkbutton(
             settings,
             text="Zorlayıcı mod: Chrome gibi davran + header/referer dene + ek fallback motorları kullan",
             variable=self.dl_hard_mode,
-        ).grid(row=7, column=1, columnspan=3, sticky="w", padx=8, pady=5)
+        ).grid(row=6, column=1, columnspan=3, sticky="w", padx=8, pady=5)
 
         ttk.Checkbutton(
             settings,
             text="Adult/video-host uyum modu: yaş/consent butonlarını dene + yt-dlp age/cookie/header ayarlarını güçlendir",
             variable=self.dl_adult_profile,
-        ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=5)
+        ).grid(row=7, column=1, columnspan=3, sticky="w", padx=8, pady=5)
 
         ttk.Checkbutton(
             settings,
             text="Playlist / seri linklerini de indir; hatalı videoyu atla, sonrakine geç",
             variable=self.dl_playlist,
-        ).grid(row=9, column=1, columnspan=3, sticky="w", padx=8, pady=7)
+        ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=7)
+
+        cookies_box = ttk.LabelFrame(f, text="2B) Tarayıcı çerezleri / oturum", style="Section.TLabelframe")
+        cookies_box.grid(row=4, column=0, sticky="ew", padx=12, pady=6)
+        cookies_box.columnconfigure(2, weight=1)
+        ttk.Label(
+            cookies_box,
+            text="Tarayıcı",
+            font=("Segoe UI Semibold", 10),
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=9)
+        ttk.Combobox(
+            cookies_box,
+            textvariable=self.dl_cookies_browser,
+            values=COOKIE_BROWSER_CHOICES,
+            state="readonly",
+            width=28,
+        ).grid(row=0, column=1, sticky="w", padx=8, pady=9)
+        ttk.Label(
+            cookies_box,
+            text="Varsayılan otomatik seçim Brave’i önceliklendirir; Brave profili yoksa Chrome → Edge → Firefox denenir. Yalnız kendi oturum/çerezlerin kullanılır.",
+            wraplength=650,
+        ).grid(row=0, column=2, sticky="w", padx=8, pady=9)
 
         action = ttk.Frame(f)
-        action.grid(row=4, column=0, sticky="ew", padx=12, pady=(6, 12))
+        action.grid(row=5, column=0, sticky="ew", padx=12, pady=(6, 12))
         action.columnconfigure(0, weight=1)
 
         ttk.Button(
@@ -3230,9 +3318,9 @@ class App(tk.Tk):
             "Not: Auto+ motor önce yt-dlp, sonra Cobalt API ve diğer açık kaynak fallbackleri dener. "
             "Zorlayıcı mod bazı skip-ad/referer isteyen sayfalarda şansı artırır; DRM, ödeme duvarı, özel hesap ve teknik koruma aşmaz. "
             "Çok Hızlı modu, aria2c kuruluysa yt-dlp altında harici çok bağlantılı indirici kullanır; "
-            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v40 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
+            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v41 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Tarayıcı çerezlerinde Brave öncelikli otomatik seçim kullanılır. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
         )
-        ttk.Label(f, text=note, wraplength=980).grid(row=5, column=0, sticky="w", padx=12, pady=(0, 10))
+        ttk.Label(f, text=note, wraplength=980).grid(row=6, column=0, sticky="w", padx=12, pady=(0, 10))
 
         self.dl_output_dir.trace_add("write", self.update_download_preview)
         self.dl_filename_base.trace_add("write", self.update_download_preview)
