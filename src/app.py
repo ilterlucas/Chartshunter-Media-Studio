@@ -3658,6 +3658,126 @@ class App(tk.Tk):
                 if process.poll() is None:
                     stop_process_quietly(process)
 
+        def is_intermediate_download_file(path: Path) -> bool:
+            low = path.name.lower()
+            return (
+                low.endswith((".part", ".ytdl", ".temp", ".tmp"))
+                or bool(re.search(r"\.f\d+\.[^.]+$", low))
+                or ".part-" in low
+            )
+
+        def complete_media_files(paths: list[Path]) -> list[Path]:
+            result: list[Path] = []
+            for path in paths:
+                try:
+                    if (
+                        path.is_file()
+                        and path.stat().st_size > 0
+                        and path.suffix.lower() in MEDIA_EXTENSIONS
+                        and not is_intermediate_download_file(path)
+                    ):
+                        result.append(path)
+                except Exception:
+                    continue
+            return result
+
+        def probe_stream_types(path: Path) -> set[str]:
+            ffprobe = shutil.which("ffprobe")
+            if not ffprobe:
+                return set()
+            try:
+                cp = subprocess.run(
+                    [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", str(path)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    timeout=15,
+                    **subprocess_hidden_kwargs(),
+                )
+                data = json.loads(cp.stdout or "{}") if cp.returncode == 0 else {}
+                return {
+                    str(item.get("codec_type") or "").lower()
+                    for item in data.get("streams", [])
+                    if isinstance(item, dict)
+                }
+            except Exception:
+                return set()
+
+        def recover_split_media_parts(before: set[Path]) -> Path | None:
+            """
+            yt-dlp video ve sesi indirmiş ama FFmpeg birleşimi yarıda kalmışsa
+            .fXXX video/ses parçalarını tek MP4 olarak toparlamayı dener.
+            """
+            created = new_files_since(before)
+            part_files = [
+                p for p in created
+                if p.suffix.lower() in MEDIA_EXTENSIONS and is_intermediate_download_file(p)
+            ]
+            if len(part_files) < 2:
+                return None
+            if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                return None
+
+            groups: dict[str, list[Path]] = {}
+            for path in part_files:
+                base = re.sub(r"\.f\d+$", "", path.stem, flags=re.IGNORECASE)
+                groups.setdefault(base, []).append(path)
+
+            for base, files in groups.items():
+                typed = [(p, probe_stream_types(p)) for p in files]
+                video = next((p for p, kinds in typed if "video" in kinds), None)
+                audio = next((p for p, kinds in typed if "audio" in kinds and "video" not in kinds), None)
+                if video is None or audio is None:
+                    continue
+
+                target = output_dir / f"{base}.mp4"
+                if target.exists():
+                    target = make_final_path(".mp4")
+
+                attempts = [
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+                        "-movflags", "+faststart", str(target),
+                    ],
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(target),
+                    ],
+                    [
+                        "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
+                        "-b:a", "192k", "-movflags", "+faststart", str(target),
+                    ],
+                ]
+
+                for attempt_no, args in enumerate(attempts, start=1):
+                    try:
+                        self.set_progress(94, f"{progress_prefix()} • parçalar birleştiriliyor ({attempt_no}/3)")
+                        self.set_download_speed("birleştiriliyor")
+                        run_ffmpeg(args, self.cancel_event)
+                        if target.exists() and target.stat().st_size > 0:
+                            self.log(f"Parça kurtarma başarılı: {target.name}")
+                            for part in files:
+                                try:
+                                    part.unlink(missing_ok=True)
+                                except Exception:
+                                    pass
+                            return target
+                    except UserCancelled:
+                        raise
+                    except Exception as e:
+                        self.log(f"Parça birleştirme denemesi {attempt_no}/3 başarısız: {str(e)[:220]}")
+                        try:
+                            target.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
+            return None
+
         def try_ytdlp(url: str) -> bool:
             if not self._ensure_python_component("yt_dlp", "yt-dlp indirme motoru", ["yt-dlp"], ["yt_dlp"], weekly_update=True):
                 return False
@@ -3671,6 +3791,18 @@ class App(tk.Tk):
             before = existing_files_snapshot()
             last_log_time = 0.0
             last_speed_sample = {"time": time.time(), "bytes": 0.0}
+            ydl_errors: list[str] = []
+
+            class _YDLLogger:
+                def debug(_self, msg):
+                    return None
+                def info(_self, msg):
+                    return None
+                def warning(_self, msg):
+                    if is_fatal_download_error_text(str(msg)):
+                        ydl_errors.append(str(msg))
+                def error(_self, msg):
+                    ydl_errors.append(str(msg))
 
             autonumber_start = next_number_index(output_dir, safe_base) if safe_base else 1
             if safe_base:
@@ -3690,7 +3822,7 @@ class App(tk.Tk):
                     downloaded = float(d.get("downloaded_bytes") or 0)
                     total = float(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
                     file_percent = max(0.0, min(100.0, downloaded / total * 100)) if total > 0 else 0.0
-                    self.set_progress(file_percent, f"yt-dlp indiriyor | Dosya %{file_percent:.1f}")
+                    self.set_progress(file_percent, f"{progress_prefix()} • yt-dlp indiriyor | Dosya %{file_percent:.1f}")
 
                     if current_time - last_log_time >= 5:
                         extra = "boyut bilinmiyor"
@@ -3725,7 +3857,7 @@ class App(tk.Tk):
 
                 elif status == "finished":
                     filename = d.get("filename") or "dosya"
-                    self.set_progress(90, "İndirme bitti, dönüştürme/birleştirme")
+                    self.set_progress(90, f"{progress_prefix()} • indirme bitti, dönüştürme/birleştirme")
                     self.set_download_speed("işleniyor")
                     self.log(f"yt-dlp indirme tamamlandı, işleniyor: {Path(filename).name}")
 
@@ -3734,7 +3866,8 @@ class App(tk.Tk):
                 "windowsfilenames": True,
                 "noplaylist": not allow_playlist,
                 "progress_hooks": [_hook],
-                "ignoreerrors": True,
+                "logger": _YDLLogger(),
+                "ignoreerrors": bool(allow_playlist),
                 "continuedl": True,
                 "skip_unavailable_fragments": True,
                 "autonumber_start": autonumber_start,
@@ -3742,8 +3875,27 @@ class App(tk.Tk):
                 "restrictfilenames": False,
                 "verbose": False,
                 "format": format_string,
+                "socket_timeout": 20,
                 **self._yt_dlp_speed_opts(),
             }
+
+            # VK erişilemez/private linklerde uzun retry zinciri yerine hızla sıradaki videoya geç.
+            if is_vk_url(url):
+                ydl_opts.update({
+                    "socket_timeout": 15,
+                    "retries": 2,
+                    "fragment_retries": 3,
+                    "extractor_retries": 1,
+                    "file_access_retries": 1,
+                })
+
+            if merge_format or is_mp3_download_mode(mode):
+                if not self._ensure_system_tool("ffmpeg", "Gyan.FFmpeg", "FFmpeg", required=True):
+                    self.log("FFmpeg hazırlanamadığı için video/ses parçaları birleştirilemedi.")
+                    return False
+                ffmpeg_bin = shutil.which("ffmpeg")
+                if ffmpeg_bin:
+                    ydl_opts["ffmpeg_location"] = str(Path(ffmpeg_bin).parent)
 
             if merge_format:
                 ydl_opts["merge_output_format"] = merge_format
@@ -3777,24 +3929,45 @@ class App(tk.Tk):
                     "Referer": current_referer(url),
                 }
 
-            if cookies_browser != "Yok":
-                browser = cookies_browser.lower()
-                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser}")
-                ydl_opts["cookiesfrombrowser"] = (browser,)
+            if cookies_browser:
+                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser.title()}")
+                ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    result = ydl.download([url])
+                    ydl.download([url])
+
                 created = new_files_since(before)
-                if created:
-                    for f in created[:10]:
+                finals = complete_media_files(created)
+                if finals:
+                    for f in finals[:10]:
                         self.log(f"Yeni dosya: {f.name}")
-                return result == 0 or bool(created)
+                    return True
+
+                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                if fatal_msg:
+                    raise FatalDownloadError(fatal_msg)
+
+                recovered = recover_split_media_parts(before)
+                if recovered is not None:
+                    return True
+
+                if created:
+                    self.log("yt-dlp dosya/parça üretti ancak tamamlanmış medya bulunamadı; fallback motora geçiliyor.")
+                return False
             except UserCancelled:
                 raise
+            except FatalDownloadError:
+                raise
             except Exception as e:
-                if is_fatal_download_error_text(str(e)):
-                    raise FatalDownloadError(str(e))
+                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                if fatal_msg or is_fatal_download_error_text(str(e)):
+                    raise FatalDownloadError(fatal_msg or str(e))
+
+                recovered = recover_split_media_parts(before)
+                if recovered is not None:
+                    return True
+
                 self.log(f"yt-dlp başarısız: {e}")
                 return False
 
