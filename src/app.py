@@ -3215,7 +3215,7 @@ class App(tk.Tk):
         self.dl_mode = tk.StringVar(value="MP4 1080p")
         self.dl_engine = tk.StringVar(value="Auto+: yt-dlp -> Cobalt -> gallery-dl -> streamlink -> direct")
         self.dl_speed_mode = tk.StringVar(value="Hızlı")
-        self.dl_cookies_browser = tk.StringVar(value=COOKIE_BROWSER_AUTO)
+        self.dl_cookies_browser = tk.StringVar(value=COOKIE_MODE_SMART)
         self.dl_cobalt_api_url = tk.StringVar(value="https://api.cobalt.tools")
         self.dl_cobalt_api_key = tk.StringVar(value="")
         self.dl_hard_mode = tk.BooleanVar(value=True)
@@ -3266,6 +3266,23 @@ class App(tk.Tk):
         ttk.Label(status_row, text="●", foreground="#991B1B", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, sticky="w")
         ttk.Label(status_row, text=" indirilemedi / üstü çizili   ").grid(row=0, column=3, sticky="w")
         ttk.Label(status_row, textvariable=self.download_status_text, font=("Segoe UI Semibold", 9)).grid(row=0, column=4, sticky="e", padx=(12, 0))
+
+        cookie_quick = ttk.Frame(intro)
+        cookie_quick.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 9))
+        cookie_quick.columnconfigure(2, weight=1)
+        ttk.Label(cookie_quick, text="Oturum / çerez", font=("Segoe UI Semibold", 9)).grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            cookie_quick,
+            textvariable=self.dl_cookies_browser,
+            values=COOKIE_BROWSER_CHOICES,
+            state="readonly",
+            width=34,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 12))
+        ttk.Label(
+            cookie_quick,
+            text="Önerilen Akıllı mod: önce çerezsiz ve hızlı dener; yalnız 403/giriş/yaş doğrulama gerektiğinde Brave → Chrome → Edge → Firefox oturumunu kullanır.",
+            wraplength=650,
+        ).grid(row=0, column=2, sticky="w")
 
         capture = ttk.LabelFrame(f, text="1B) Dahili Browser / UniTube tarzı stream yakalama", style="Section.TLabelframe")
         capture.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
@@ -3412,29 +3429,8 @@ class App(tk.Tk):
             variable=self.dl_playlist,
         ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=7)
 
-        cookies_box = ttk.LabelFrame(f, text="2B) Tarayıcı çerezleri / oturum", style="Section.TLabelframe")
-        cookies_box.grid(row=4, column=0, sticky="ew", padx=12, pady=6)
-        cookies_box.columnconfigure(2, weight=1)
-        ttk.Label(
-            cookies_box,
-            text="Tarayıcı",
-            font=("Segoe UI Semibold", 10),
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=9)
-        ttk.Combobox(
-            cookies_box,
-            textvariable=self.dl_cookies_browser,
-            values=COOKIE_BROWSER_CHOICES,
-            state="readonly",
-            width=28,
-        ).grid(row=0, column=1, sticky="w", padx=8, pady=9)
-        ttk.Label(
-            cookies_box,
-            text="Varsayılan otomatik seçim Brave’i önceliklendirir; Brave profili yoksa Chrome → Edge → Firefox denenir. Yalnız kendi oturum/çerezlerin kullanılır.",
-            wraplength=650,
-        ).grid(row=0, column=2, sticky="w", padx=8, pady=9)
-
         action = ttk.Frame(f)
-        action.grid(row=5, column=0, sticky="ew", padx=12, pady=(6, 12))
+        action.grid(row=4, column=0, sticky="ew", padx=12, pady=(6, 12))
         action.columnconfigure(0, weight=1)
 
         ttk.Button(
@@ -3453,9 +3449,9 @@ class App(tk.Tk):
             "Not: Auto+ motor önce yt-dlp, sonra Cobalt API ve diğer açık kaynak fallbackleri dener. "
             "Zorlayıcı mod bazı skip-ad/referer isteyen sayfalarda şansı artırır; DRM, ödeme duvarı, özel hesap ve teknik koruma aşmaz. "
             "Çok Hızlı modu, aria2c kuruluysa yt-dlp altında harici çok bağlantılı indirici kullanır; "
-            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v41 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Tarayıcı çerezlerinde Brave öncelikli otomatik seçim kullanılır. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
+            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v43 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Çerez modu Akıllı'dır: public linkleri çerezsiz dener, sadece gerektiğinde tarayıcı oturumuna geçer. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
         )
-        ttk.Label(f, text=note, wraplength=980).grid(row=6, column=0, sticky="w", padx=12, pady=(0, 10))
+        ttk.Label(f, text=note, wraplength=980).grid(row=5, column=0, sticky="w", padx=12, pady=(0, 10))
 
         self.dl_output_dir.trace_add("write", self.update_download_preview)
         self.dl_filename_base.trace_add("write", self.update_download_preview)
