@@ -3606,7 +3606,10 @@ class App(tk.Tk):
         engine_choice = self.dl_engine.get()
         speed_mode = self.dl_speed_mode.get()
         cookies_browser_choice = self.dl_cookies_browser.get()
-        cookies_browser = resolve_cookie_browser_choice(cookies_browser_choice)
+        smart_cookie_mode = cookies_browser_choice == COOKIE_MODE_SMART
+        # Akıllı modda tarayıcı çerezlerini baştan yüklemiyoruz. Public linkler en hızlı
+        # çerezsiz yol ile gider; yalnız oturum gerektiği anlaşılırsa tarayıcı seçilir.
+        cookies_browser = None if smart_cookie_mode else resolve_cookie_browser_choice(cookies_browser_choice)
         hard_mode = bool(self.dl_hard_mode.get())
         adult_profile = bool(getattr(self, "dl_adult_profile", tk.BooleanVar(value=True)).get())
         adult_detected = has_adult_video_host_url(download_items)
@@ -3625,10 +3628,13 @@ class App(tk.Tk):
         self.after(0, self.update_download_preview)
 
         self.log(f"Link indirme başladı. Link sayısı: {len(download_items)} | Tür: {mode}")
-        cookie_display = cookies_browser.title() if cookies_browser else "Yok"
-        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez seçimi: {cookies_browser_choice} -> {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
-        if cookies_browser_choice == COOKIE_BROWSER_AUTO and not cookies_browser:
-            self.log("Tarayıcı çerezi otomatik seçiminde kullanılabilir profil bulunamadı; çerezsiz devam edilecek.")
+        if smart_cookie_mode:
+            cookie_display = "Akıllı: ilk deneme çerezsiz"
+        else:
+            cookie_display = cookies_browser.title() if cookies_browser else "Yok"
+        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez: {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        if smart_cookie_mode:
+            self.log("Akıllı çerez modu aktif: çerez veritabanı her linkte okunmayacak; yalnız oturum/403/yaş doğrulama hatasında tarayıcı çereziyle bir kez tekrar denenecek.")
         self.log(f"Cobalt API: {self.dl_cobalt_api_url.get().strip() or 'Kapalı'}")
         if adult_detected:
             self.log("Adult/video-host alan adı algılandı. Uyum profili aktif: age-limit/header/referer/consent yakalama ayarları güçlendirilecek.")
@@ -3675,13 +3681,23 @@ class App(tk.Tk):
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/121.0.0.0 Safari/537.36"
         )
-        current_link_context = {"referer": None, "index": 0, "total": total_urls, "label": ""}
+        current_link_context = {
+            "referer": None,
+            "index": 0,
+            "total": total_urls,
+            "label": "",
+            "active_cookie_browser": cookies_browser,
+        }
 
         def current_referer(default_url: str) -> str:
             return str(current_link_context.get("referer") or default_url)
 
         def current_adult_profile(url: str) -> bool:
             return bool(adult_profile or is_adult_video_host_url(url))
+
+        def current_cookie_browser() -> str | None:
+            value = current_link_context.get("active_cookie_browser")
+            return str(value) if value else None
 
         def current_hard_mode(url: str) -> bool:
             # Adult/video-host profili açıksa hard davranışı otomatik kullanılır.
@@ -4607,6 +4623,9 @@ class App(tk.Tk):
                 if visible_status_enabled:
                     self._set_download_line_status(current_line_no, "processing")
                 current_link_context["referer"] = link_referer
+                # Manuel tarayıcı seçildiyse her linkte kullanılır. Akıllı modda ise
+                # her yeni link yine hızlı/çerezsiz başlar.
+                current_link_context["active_cookie_browser"] = cookies_browser
                 current_link_context["index"] = url_index
                 current_link_context["total"] = total_urls
                 host_label = (urlparse(url).hostname or "").replace("www.", "")
