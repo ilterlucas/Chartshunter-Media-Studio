@@ -24,8 +24,8 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-APP_NAME = "Chartshunter Media Studio v42"
-APP_VERSION = "v42"
+APP_NAME = "Chartshunter Media Studio v43"
+APP_VERSION = "v43"
 
 MEDIA_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
@@ -404,8 +404,45 @@ def is_vk_url(url: str) -> bool:
     return host in {"vk.com", "www.vk.com", "m.vk.com", "vkvideo.ru", "www.vkvideo.ru"} or host.endswith(".vk.com") or host.endswith(".vkvideo.ru")
 
 
-COOKIE_BROWSER_AUTO = "Otomatik (Brave öncelikli)"
-COOKIE_BROWSER_CHOICES = [COOKIE_BROWSER_AUTO, "Brave", "Chrome", "Edge", "Firefox", "Yok"]
+COOKIE_MODE_SMART = "Akıllı (önerilen - gerektiğinde çerez)"
+COOKIE_BROWSER_AUTO = "Otomatik tarayıcı (Brave öncelikli)"
+COOKIE_BROWSER_CHOICES = [
+    COOKIE_MODE_SMART,
+    "Yok (en hızlı)",
+    "Brave (her linkte)",
+    "Chrome (her linkte)",
+    "Edge (her linkte)",
+    "Firefox (her linkte)",
+]
+
+
+def is_cookie_retry_error_text(text: str) -> bool:
+    """İlk çerezsiz denemeden sonra oturum çereziyle tekrar denemeye değer hataları tanır."""
+    low = (text or "").lower()
+    tokens = [
+        "403 forbidden",
+        "http error 403",
+        "login required",
+        "requires login",
+        "please log in",
+        "sign in to confirm",
+        "sign in",
+        "authentication required",
+        "authentication is required",
+        "cookies",
+        "cookie",
+        "age-restricted",
+        "age restricted",
+        "confirm your age",
+        "this video is private",
+        "private video",
+        "members-only",
+        "members only",
+        "confirm you're not a bot",
+        "confirm you are not a bot",
+        "not a bot",
+    ]
+    return any(token in low for token in tokens)
 
 
 def _browser_cookie_profile_exists(browser: str) -> bool:
@@ -431,18 +468,28 @@ def _browser_cookie_profile_exists(browser: str) -> bool:
 def resolve_cookie_browser_choice(choice: str) -> str | None:
     """
     GUI seçimini yt-dlp'nin beklediği tarayıcı adına çevirir.
-    Otomatik mod Brave -> Chrome -> Edge -> Firefox sırasıyla mevcut profili seçer.
+    Otomatik tarayıcı seçimi Brave -> Chrome -> Edge -> Firefox sırasını kullanır.
+    Akıllı mod burada tarayıcı döndürmez; tarayıcı yalnız gerçekten gerektiğinde seçilir.
     """
     raw = (choice or "").strip()
-    if not raw or raw == "Yok":
+    if not raw or raw in {COOKIE_MODE_SMART, "Yok", "Yok (en hızlı)"}:
         return None
     if raw == COOKIE_BROWSER_AUTO:
         for browser in ("brave", "chrome", "edge", "firefox"):
             if _browser_cookie_profile_exists(browser):
                 return browser
         return None
+
     low = raw.lower()
-    return low if low in {"brave", "chrome", "edge", "firefox"} else None
+    for browser in ("brave", "chrome", "edge", "firefox"):
+        if low == browser or low.startswith(browser + " "):
+            return browser
+    return None
+
+
+def resolve_auto_cookie_browser() -> str | None:
+    """Akıllı mod gerektiğinde kullanılacak ilk mevcut tarayıcı profilini seçer."""
+    return resolve_cookie_browser_choice(COOKIE_BROWSER_AUTO)
 
 
 def stop_process_quietly(process: subprocess.Popen) -> None:
@@ -3168,7 +3215,7 @@ class App(tk.Tk):
         self.dl_mode = tk.StringVar(value="MP4 1080p")
         self.dl_engine = tk.StringVar(value="Auto+: yt-dlp -> Cobalt -> gallery-dl -> streamlink -> direct")
         self.dl_speed_mode = tk.StringVar(value="Hızlı")
-        self.dl_cookies_browser = tk.StringVar(value=COOKIE_BROWSER_AUTO)
+        self.dl_cookies_browser = tk.StringVar(value=COOKIE_MODE_SMART)
         self.dl_cobalt_api_url = tk.StringVar(value="https://api.cobalt.tools")
         self.dl_cobalt_api_key = tk.StringVar(value="")
         self.dl_hard_mode = tk.BooleanVar(value=True)
@@ -3219,6 +3266,23 @@ class App(tk.Tk):
         ttk.Label(status_row, text="●", foreground="#991B1B", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, sticky="w")
         ttk.Label(status_row, text=" indirilemedi / üstü çizili   ").grid(row=0, column=3, sticky="w")
         ttk.Label(status_row, textvariable=self.download_status_text, font=("Segoe UI Semibold", 9)).grid(row=0, column=4, sticky="e", padx=(12, 0))
+
+        cookie_quick = ttk.Frame(intro)
+        cookie_quick.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 9))
+        cookie_quick.columnconfigure(2, weight=1)
+        ttk.Label(cookie_quick, text="Oturum / çerez", font=("Segoe UI Semibold", 9)).grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            cookie_quick,
+            textvariable=self.dl_cookies_browser,
+            values=COOKIE_BROWSER_CHOICES,
+            state="readonly",
+            width=34,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 12))
+        ttk.Label(
+            cookie_quick,
+            text="Önerilen Akıllı mod: önce çerezsiz ve hızlı dener; yalnız 403/giriş/yaş doğrulama gerektiğinde Brave → Chrome → Edge → Firefox oturumunu kullanır.",
+            wraplength=650,
+        ).grid(row=0, column=2, sticky="w")
 
         capture = ttk.LabelFrame(f, text="1B) Dahili Browser / UniTube tarzı stream yakalama", style="Section.TLabelframe")
         capture.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
@@ -3365,29 +3429,8 @@ class App(tk.Tk):
             variable=self.dl_playlist,
         ).grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=7)
 
-        cookies_box = ttk.LabelFrame(f, text="2B) Tarayıcı çerezleri / oturum", style="Section.TLabelframe")
-        cookies_box.grid(row=4, column=0, sticky="ew", padx=12, pady=6)
-        cookies_box.columnconfigure(2, weight=1)
-        ttk.Label(
-            cookies_box,
-            text="Tarayıcı",
-            font=("Segoe UI Semibold", 10),
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=9)
-        ttk.Combobox(
-            cookies_box,
-            textvariable=self.dl_cookies_browser,
-            values=COOKIE_BROWSER_CHOICES,
-            state="readonly",
-            width=28,
-        ).grid(row=0, column=1, sticky="w", padx=8, pady=9)
-        ttk.Label(
-            cookies_box,
-            text="Varsayılan otomatik seçim Brave’i önceliklendirir; Brave profili yoksa Chrome → Edge → Firefox denenir. Yalnız kendi oturum/çerezlerin kullanılır.",
-            wraplength=650,
-        ).grid(row=0, column=2, sticky="w", padx=8, pady=9)
-
         action = ttk.Frame(f)
-        action.grid(row=5, column=0, sticky="ew", padx=12, pady=(6, 12))
+        action.grid(row=4, column=0, sticky="ew", padx=12, pady=(6, 12))
         action.columnconfigure(0, weight=1)
 
         ttk.Button(
@@ -3406,9 +3449,9 @@ class App(tk.Tk):
             "Not: Auto+ motor önce yt-dlp, sonra Cobalt API ve diğer açık kaynak fallbackleri dener. "
             "Zorlayıcı mod bazı skip-ad/referer isteyen sayfalarda şansı artırır; DRM, ödeme duvarı, özel hesap ve teknik koruma aşmaz. "
             "Çok Hızlı modu, aria2c kuruluysa yt-dlp altında harici çok bağlantılı indirici kullanır; "
-            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v41 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Tarayıcı çerezlerinde Brave öncelikli otomatik seçim kullanılır. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
+            "UniTube benzeri hız hissi en çok burada gelir. Site hız kısıyorsa mucize bekleme. v43 varsayılan olarak Hızlı modu kullanır; Zorlayıcı mod ve Adult/video-host uyum modu açık gelir. Çerez modu Akıllı'dır: public linkleri çerezsiz dener, sadece gerektiğinde tarayıcı oturumuna geçer. aria2 yalnızca Çok Hızlı seçilirse devreye girer."
         )
-        ttk.Label(f, text=note, wraplength=980).grid(row=6, column=0, sticky="w", padx=12, pady=(0, 10))
+        ttk.Label(f, text=note, wraplength=980).grid(row=5, column=0, sticky="w", padx=12, pady=(0, 10))
 
         self.dl_output_dir.trace_add("write", self.update_download_preview)
         self.dl_filename_base.trace_add("write", self.update_download_preview)
@@ -3563,7 +3606,10 @@ class App(tk.Tk):
         engine_choice = self.dl_engine.get()
         speed_mode = self.dl_speed_mode.get()
         cookies_browser_choice = self.dl_cookies_browser.get()
-        cookies_browser = resolve_cookie_browser_choice(cookies_browser_choice)
+        smart_cookie_mode = cookies_browser_choice == COOKIE_MODE_SMART
+        # Akıllı modda tarayıcı çerezlerini baştan yüklemiyoruz. Public linkler en hızlı
+        # çerezsiz yol ile gider; yalnız oturum gerektiği anlaşılırsa tarayıcı seçilir.
+        cookies_browser = None if smart_cookie_mode else resolve_cookie_browser_choice(cookies_browser_choice)
         hard_mode = bool(self.dl_hard_mode.get())
         adult_profile = bool(getattr(self, "dl_adult_profile", tk.BooleanVar(value=True)).get())
         adult_detected = has_adult_video_host_url(download_items)
@@ -3582,10 +3628,13 @@ class App(tk.Tk):
         self.after(0, self.update_download_preview)
 
         self.log(f"Link indirme başladı. Link sayısı: {len(download_items)} | Tür: {mode}")
-        cookie_display = cookies_browser.title() if cookies_browser else "Yok"
-        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez seçimi: {cookies_browser_choice} -> {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
-        if cookies_browser_choice == COOKIE_BROWSER_AUTO and not cookies_browser:
-            self.log("Tarayıcı çerezi otomatik seçiminde kullanılabilir profil bulunamadı; çerezsiz devam edilecek.")
+        if smart_cookie_mode:
+            cookie_display = "Akıllı: ilk deneme çerezsiz"
+        else:
+            cookie_display = cookies_browser.title() if cookies_browser else "Yok"
+        self.log(f"Motor: {engine_choice} | Hız modu: {speed_mode} | Çerez: {cookie_display} | Zorlayıcı mod: {'Açık' if hard_mode else 'Kapalı'} | Adult/video-host uyum: {'Açık' if adult_profile else 'Kapalı'}")
+        if smart_cookie_mode:
+            self.log("Akıllı çerez modu aktif: çerez veritabanı her linkte okunmayacak; yalnız oturum/403/yaş doğrulama hatasında tarayıcı çereziyle bir kez tekrar denenecek.")
         self.log(f"Cobalt API: {self.dl_cobalt_api_url.get().strip() or 'Kapalı'}")
         if adult_detected:
             self.log("Adult/video-host alan adı algılandı. Uyum profili aktif: age-limit/header/referer/consent yakalama ayarları güçlendirilecek.")
@@ -3632,13 +3681,23 @@ class App(tk.Tk):
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/121.0.0.0 Safari/537.36"
         )
-        current_link_context = {"referer": None, "index": 0, "total": total_urls, "label": ""}
+        current_link_context = {
+            "referer": None,
+            "index": 0,
+            "total": total_urls,
+            "label": "",
+            "active_cookie_browser": cookies_browser,
+        }
 
         def current_referer(default_url: str) -> str:
             return str(current_link_context.get("referer") or default_url)
 
         def current_adult_profile(url: str) -> bool:
             return bool(adult_profile or is_adult_video_host_url(url))
+
+        def current_cookie_browser() -> str | None:
+            value = current_link_context.get("active_cookie_browser")
+            return str(value) if value else None
 
         def current_hard_mode(url: str) -> bool:
             # Adult/video-host profili açıksa hard davranışı otomatik kullanılır.
@@ -4031,47 +4090,81 @@ class App(tk.Tk):
                     "Referer": current_referer(url),
                 }
 
-            if cookies_browser:
-                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser.title()}")
-                ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+            def _execute_ytdlp_once(browser_for_attempt: str | None) -> tuple[bool, str]:
+                """Tek yt-dlp denemesi. Akıllı modda ilk tur çerezsiz, gerekirse ikinci tur çerezli."""
+                ydl_errors.clear()
+                attempt_opts = dict(ydl_opts)
+                attempt_opts.pop("cookiesfrombrowser", None)
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+                if browser_for_attempt:
+                    self.log(f"yt-dlp oturum çerezleri: {browser_for_attempt.title()}")
+                    attempt_opts["cookiesfrombrowser"] = (browser_for_attempt,)
+
+                try:
+                    with yt_dlp.YoutubeDL(attempt_opts) as ydl:
+                        ydl.download([url])
+                except UserCancelled:
+                    raise
+                except Exception as e:
+                    fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                    error_text = fatal_msg or str(e)
+
+                    # Giriş/403/cookie kaynaklı hata ise Akıllı modun önce çerezli retry yapmasına izin ver.
+                    if is_cookie_retry_error_text(error_text):
+                        return False, error_text
+
+                    recovered = recover_split_media_parts(before)
+                    if recovered is not None:
+                        return True, ""
+
+                    return False, error_text
 
                 created = new_files_since(before)
                 finals = complete_media_files(created)
                 if finals:
                     for f in finals[:10]:
                         self.log(f"Yeni dosya: {f.name}")
-                    return True
+                    return True, ""
 
-                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
-                if fatal_msg:
-                    raise FatalDownloadError(fatal_msg)
+                error_text = next((msg for msg in ydl_errors if msg), "")
+                if error_text and is_cookie_retry_error_text(error_text):
+                    return False, error_text
 
                 recovered = recover_split_media_parts(before)
                 if recovered is not None:
-                    return True
+                    return True, ""
 
                 if created:
                     self.log("yt-dlp dosya/parça üretti ancak tamamlanmış medya bulunamadı; fallback motora geçiliyor.")
-                return False
-            except UserCancelled:
-                raise
-            except FatalDownloadError:
-                raise
-            except Exception as e:
-                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
-                if fatal_msg or is_fatal_download_error_text(str(e)):
-                    raise FatalDownloadError(fatal_msg or str(e))
+                return False, error_text
 
-                recovered = recover_split_media_parts(before)
-                if recovered is not None:
-                    return True
+            first_browser = current_cookie_browser()
+            ok, error_text = _execute_ytdlp_once(first_browser)
+            if ok:
+                return True
 
-                self.log(f"yt-dlp başarısız: {e}")
-                return False
+            # Akıllı modun amacı hız: normal/public linklerde tarayıcı cookie DB'sine hiç dokunma.
+            # Yalnız hata oturum gerektiğini düşündürüyorsa bir kez tarayıcı çereziyle tekrar dene.
+            if smart_cookie_mode and not first_browser and is_cookie_retry_error_text(error_text):
+                retry_browser = resolve_auto_cookie_browser()
+                if retry_browser:
+                    current_link_context["active_cookie_browser"] = retry_browser
+                    self.log(
+                        f"Oturum gerektiği algılandı. Bir kez {retry_browser.title()} çerezleriyle tekrar deneniyor."
+                    )
+                    ok, retry_error = _execute_ytdlp_once(retry_browser)
+                    if ok:
+                        return True
+                    error_text = retry_error or error_text
+                else:
+                    self.log("Oturum gerektiği görünüyor ancak Brave/Chrome/Edge/Firefox profili bulunamadı.")
+
+            if error_text and is_fatal_download_error_text(error_text):
+                raise FatalDownloadError(error_text)
+
+            if error_text:
+                self.log(f"yt-dlp başarısız: {error_text}")
+            return False
 
         def try_ytdlp_cli_hard(url: str) -> bool:
             """yt-dlp komut satırıyla daha zorlayıcı deneme: Chrome impersonation + header/referer.
@@ -4138,8 +4231,9 @@ class App(tk.Tk):
             if current_adult_profile(url):
                 args += ["--age-limit", "18", "--geo-bypass"]
 
-            if cookies_browser:
-                args += ["--cookies-from-browser", cookies_browser]
+            active_cookie_browser = current_cookie_browser()
+            if active_cookie_browser:
+                args += ["--cookies-from-browser", active_cookie_browser]
 
             args.append(url)
 
@@ -4564,6 +4658,9 @@ class App(tk.Tk):
                 if visible_status_enabled:
                     self._set_download_line_status(current_line_no, "processing")
                 current_link_context["referer"] = link_referer
+                # Manuel tarayıcı seçildiyse her linkte kullanılır. Akıllı modda ise
+                # her yeni link yine hızlı/çerezsiz başlar.
+                current_link_context["active_cookie_browser"] = cookies_browser
                 current_link_context["index"] = url_index
                 current_link_context["total"] = total_urls
                 host_label = (urlparse(url).hostname or "").replace("www.", "")

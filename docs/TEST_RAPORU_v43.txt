@@ -1,0 +1,46 @@
+Chartshunter Media Studio v43 - Test Raporu
+Tarih: 2026-09-14
+
+[PASS] app.py syntax/compile
+[PASS] bootstrap.py syntax/compile
+[PASS] maintenance.py syntax/compile
+[PASS] self_test.py syntax/compile
+[PASS] APP_VERSION = v43
+[PASS] Grup/link parser
+[PASS] Dosya adı temizleme
+[PASS] Genel fatal download hata tanıma
+[PASS] VK erişilemez hata tanıma
+[PASS] VK host tanıma
+[PASS] Brave manuel çerez seçimi
+[PASS] Akıllı çerez için auth/403/cookie hata tanıma
+[PASS] Akıllı modun ilk turda tarayıcı seçmemesi
+[PASS] Akıllı çerez varsayılanı
+[PASS] Çerez kontrolünün link kutusu yanında görünür olması
+[PASS] Gerektiğinde Brave -> Chrome -> Edge -> Firefox retry yolu
+[PASS] Hızlı varsayılanı
+[PASS] Zorlayıcı mod varsayılan Açık
+[PASS] Adult/video-host varsayılan Açık
+[PASS] Çoklu Video X/Y progress
+[PASS] CLI timeout mekanizması
+[PASS] Split video/audio recovery
+[PASS] Yeşil başarılı / kırmızı üstü çizili başarısız link durumu
+[PASS] Canlı indirme durum özeti
+[PASS] Açılışta warm-up install yok
+[PASS] İlk oturum update metadata kontrolü korunuyor
+[PASS] Windows ana launcher Go build
+[PASS] Windows Repair & Update launcher Go build
+
+GitHub Actions Windows development test sonucu: SUCCESS
+Workflow run: 34881368742
+
+Performans kararı:
+- Brave her linkte zorunlu varsayılan yapılmadı.
+- Public linklerde ilk deneme çerezsizdir.
+- Yalnız oturum/403/yaş/cookie ihtiyacı algılanırsa tarayıcı çereziyle ikinci deneme yapılır.
+- Otomatik tarayıcı önceliği: Brave, Chrome, Edge, Firefox.
+- Kullanıcı isterse belirli tarayıcıyı her linkte manuel zorlayabilir.
+
+Notlar:
+- Testler Windows GitHub runner üzerinde compile/statik/core regresyon ve launcher build testleridir.
+- Canlı üçüncü taraf sitelerde gerçek hesap/çerez ile performans testi yapılmadı.
+- Site davranışı ve extractor değişiklikleri zamanla değişebilir.
