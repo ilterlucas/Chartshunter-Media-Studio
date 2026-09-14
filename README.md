@@ -1,35 +1,27 @@
 # Chartshunter Media Studio
 
-**Current stable release: v42 Stable**
+**Current stable release: v43 Stable**
 
-[![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v42)
-[![Release](https://img.shields.io/badge/release-v42%20Stable-brightgreen)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v42)
+[![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v43)
+[![Release](https://img.shields.io/badge/release-v43%20Stable-brightgreen)](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v43)
 [![Build](https://github.com/ilterlucas/Chartshunter-Media-Studio/actions/workflows/release.yml/badge.svg)](https://github.com/ilterlucas/Chartshunter-Media-Studio/actions/workflows/release.yml)
 
 Windows için medya indirme, altyazı üretme, British UK TTS, MP3 birleştirme ve MP3 + kapak görselinden video üretme uygulaması.
 
 ## İndir
 
-**Önerilen paket:** [ChartshunterMediaStudio_v42_Stable.zip](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/download/v42/ChartshunterMediaStudio_v42_Stable.zip)
+**Önerilen paket:** [ChartshunterMediaStudio_v43_Stable.zip](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/download/v43/ChartshunterMediaStudio_v43_Stable.zip)
 
-Tüm v42 dosyaları ve SHA256 doğrulaması için: [v42 Stable Release](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v42)
+Tüm v43 dosyaları ve SHA256 doğrulaması için: [v43 Stable Release](https://github.com/ilterlucas/Chartshunter-Media-Studio/releases/tag/v43)
 
-## v42 öne çıkanlar
+## v43 öne çıkanlar
 
-- Çoklu link kutusunda başarıyla indirilen linkler **yeşil**.
-- İndirilemeyen linkler **kırmızı ve üstü çizili**.
-- İşlenen link sarı, iptal/yarım kalan link gri gösterilir.
-- Link kutusunun altında canlı durum özeti bulunur.
-- v41'in VK fail-fast, Brave öncelikli çerez, Video X/Y ve parçalı medya kurtarma özellikleri korunur.
-
-## Hızlı kullanım
-
-1. Stable ZIP paketini indir.
-2. ZIP'i normal bir klasöre tamamen çıkar.
-3. **Chartshunter Media Studio.exe** dosyasını aç.
-4. Linkleri **0 İndir** sekmesine yapıştır.
-
-Uygulama açılışta ağır bileşenleri topluca kurmaz. İlk oturumda yalnız güncelleme verilerini kontrol eder; büyük bileşenler gerektiğinde seçenek olarak sunulur.
+- Tarayıcı çerezleri artık link kutusunun hemen altında görünür.
+- Varsayılan **Akıllı çerez**: normal link önce çerezsiz denenir.
+- Yalnız giriş/403/yaş doğrulama gerektiğinde otomatik olarak Brave → Chrome → Edge → Firefox sırasıyla oturum çerezi denenir.
+- Böylece çoklu public indirmelerde her linkte cookie DB okuma yükü kaldırıldı.
+- Brave yine ilk tercih; ayrıca **Brave (her linkte)** manuel seçeneği mevcut.
+- v42'nin yeşil/kırmızı link durumu ve v41'in VK/parça birleştirme düzeltmeleri korunur.
 
 ## Varsayılan indirme ayarları
 
@@ -38,6 +30,6 @@ Uygulama açılışta ağır bileşenleri topluca kurmaz. İlk oturumda yalnız 
 - Hız: **Hızlı**
 - Zorlayıcı mod: **Açık**
 - Adult/video-host uyum modu: **Açık**
-- Tarayıcı çerezleri: **Otomatik (Brave öncelikli)**
+- Oturum/çerez: **Akıllı (önerilen - gerektiğinde çerez)**
 
 > Yalnız erişim ve kullanım hakkın olan içeriklerde kullan. DRM, ödeme duvarı veya erişim kontrolünü aşmak için tasarlanmamıştır.
