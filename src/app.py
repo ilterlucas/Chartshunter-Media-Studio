@@ -4090,47 +4090,81 @@ class App(tk.Tk):
                     "Referer": current_referer(url),
                 }
 
-            if cookies_browser:
-                self.log(f"yt-dlp tarayıcı çerezleri kullanılacak: {cookies_browser.title()}")
-                ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+            def _execute_ytdlp_once(browser_for_attempt: str | None) -> tuple[bool, str]:
+                """Tek yt-dlp denemesi. Akıllı modda ilk tur çerezsiz, gerekirse ikinci tur çerezli."""
+                ydl_errors.clear()
+                attempt_opts = dict(ydl_opts)
+                attempt_opts.pop("cookiesfrombrowser", None)
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+                if browser_for_attempt:
+                    self.log(f"yt-dlp oturum çerezleri: {browser_for_attempt.title()}")
+                    attempt_opts["cookiesfrombrowser"] = (browser_for_attempt,)
+
+                try:
+                    with yt_dlp.YoutubeDL(attempt_opts) as ydl:
+                        ydl.download([url])
+                except UserCancelled:
+                    raise
+                except Exception as e:
+                    fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
+                    error_text = fatal_msg or str(e)
+
+                    # Giriş/403/cookie kaynaklı hata ise Akıllı modun önce çerezli retry yapmasına izin ver.
+                    if is_cookie_retry_error_text(error_text):
+                        return False, error_text
+
+                    recovered = recover_split_media_parts(before)
+                    if recovered is not None:
+                        return True, ""
+
+                    return False, error_text
 
                 created = new_files_since(before)
                 finals = complete_media_files(created)
                 if finals:
                     for f in finals[:10]:
                         self.log(f"Yeni dosya: {f.name}")
-                    return True
+                    return True, ""
 
-                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
-                if fatal_msg:
-                    raise FatalDownloadError(fatal_msg)
+                error_text = next((msg for msg in ydl_errors if msg), "")
+                if error_text and is_cookie_retry_error_text(error_text):
+                    return False, error_text
 
                 recovered = recover_split_media_parts(before)
                 if recovered is not None:
-                    return True
+                    return True, ""
 
                 if created:
                     self.log("yt-dlp dosya/parça üretti ancak tamamlanmış medya bulunamadı; fallback motora geçiliyor.")
-                return False
-            except UserCancelled:
-                raise
-            except FatalDownloadError:
-                raise
-            except Exception as e:
-                fatal_msg = next((msg for msg in ydl_errors if is_fatal_download_error_text(msg)), None)
-                if fatal_msg or is_fatal_download_error_text(str(e)):
-                    raise FatalDownloadError(fatal_msg or str(e))
+                return False, error_text
 
-                recovered = recover_split_media_parts(before)
-                if recovered is not None:
-                    return True
+            first_browser = current_cookie_browser()
+            ok, error_text = _execute_ytdlp_once(first_browser)
+            if ok:
+                return True
 
-                self.log(f"yt-dlp başarısız: {e}")
-                return False
+            # Akıllı modun amacı hız: normal/public linklerde tarayıcı cookie DB'sine hiç dokunma.
+            # Yalnız hata oturum gerektiğini düşündürüyorsa bir kez tarayıcı çereziyle tekrar dene.
+            if smart_cookie_mode and not first_browser and is_cookie_retry_error_text(error_text):
+                retry_browser = resolve_auto_cookie_browser()
+                if retry_browser:
+                    current_link_context["active_cookie_browser"] = retry_browser
+                    self.log(
+                        f"Oturum gerektiği algılandı. Bir kez {retry_browser.title()} çerezleriyle tekrar deneniyor."
+                    )
+                    ok, retry_error = _execute_ytdlp_once(retry_browser)
+                    if ok:
+                        return True
+                    error_text = retry_error or error_text
+                else:
+                    self.log("Oturum gerektiği görünüyor ancak Brave/Chrome/Edge/Firefox profili bulunamadı.")
+
+            if error_text and is_fatal_download_error_text(error_text):
+                raise FatalDownloadError(error_text)
+
+            if error_text:
+                self.log(f"yt-dlp başarısız: {error_text}")
+            return False
 
         def try_ytdlp_cli_hard(url: str) -> bool:
             """yt-dlp komut satırıyla daha zorlayıcı deneme: Chrome impersonation + header/referer.
@@ -4197,8 +4231,9 @@ class App(tk.Tk):
             if current_adult_profile(url):
                 args += ["--age-limit", "18", "--geo-bypass"]
 
-            if cookies_browser:
-                args += ["--cookies-from-browser", cookies_browser]
+            active_cookie_browser = current_cookie_browser()
+            if active_cookie_browser:
+                args += ["--cookies-from-browser", active_cookie_browser]
 
             args.append(url)
 
