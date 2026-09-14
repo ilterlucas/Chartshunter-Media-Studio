@@ -1,9 +1,9 @@
-name: v42 Development Test
+name: v43 Development Test
 
 on:
   push:
     branches:
-      - v42-dev
+      - v43-dev
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m py_compile src\app.py src\bootstrap.py src\maintenance.py src\self_test.py
 
-      - name: Run v42 self tests
+      - name: Run v43 self tests
         shell: pwsh
         run: |
           python src\self_test.py
