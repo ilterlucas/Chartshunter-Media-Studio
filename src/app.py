@@ -24,8 +24,8 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-APP_NAME = "Chartshunter Media Studio v42"
-APP_VERSION = "v42"
+APP_NAME = "Chartshunter Media Studio v43"
+APP_VERSION = "v43"
 
 MEDIA_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
@@ -404,8 +404,45 @@ def is_vk_url(url: str) -> bool:
     return host in {"vk.com", "www.vk.com", "m.vk.com", "vkvideo.ru", "www.vkvideo.ru"} or host.endswith(".vk.com") or host.endswith(".vkvideo.ru")
 
 
-COOKIE_BROWSER_AUTO = "Otomatik (Brave öncelikli)"
-COOKIE_BROWSER_CHOICES = [COOKIE_BROWSER_AUTO, "Brave", "Chrome", "Edge", "Firefox", "Yok"]
+COOKIE_MODE_SMART = "Akıllı (önerilen - gerektiğinde çerez)"
+COOKIE_BROWSER_AUTO = "Otomatik tarayıcı (Brave öncelikli)"
+COOKIE_BROWSER_CHOICES = [
+    COOKIE_MODE_SMART,
+    "Yok (en hızlı)",
+    "Brave (her linkte)",
+    "Chrome (her linkte)",
+    "Edge (her linkte)",
+    "Firefox (her linkte)",
+]
+
+
+def is_cookie_retry_error_text(text: str) -> bool:
+    """İlk çerezsiz denemeden sonra oturum çereziyle tekrar denemeye değer hataları tanır."""
+    low = (text or "").lower()
+    tokens = [
+        "403 forbidden",
+        "http error 403",
+        "login required",
+        "requires login",
+        "please log in",
+        "sign in to confirm",
+        "sign in",
+        "authentication required",
+        "authentication is required",
+        "cookies",
+        "cookie",
+        "age-restricted",
+        "age restricted",
+        "confirm your age",
+        "this video is private",
+        "private video",
+        "members-only",
+        "members only",
+        "confirm you're not a bot",
+        "confirm you are not a bot",
+        "not a bot",
+    ]
+    return any(token in low for token in tokens)
 
 
 def _browser_cookie_profile_exists(browser: str) -> bool:
@@ -431,18 +468,28 @@ def _browser_cookie_profile_exists(browser: str) -> bool:
 def resolve_cookie_browser_choice(choice: str) -> str | None:
     """
     GUI seçimini yt-dlp'nin beklediği tarayıcı adına çevirir.
-    Otomatik mod Brave -> Chrome -> Edge -> Firefox sırasıyla mevcut profili seçer.
+    Otomatik tarayıcı seçimi Brave -> Chrome -> Edge -> Firefox sırasını kullanır.
+    Akıllı mod burada tarayıcı döndürmez; tarayıcı yalnız gerçekten gerektiğinde seçilir.
     """
     raw = (choice or "").strip()
-    if not raw or raw == "Yok":
+    if not raw or raw in {COOKIE_MODE_SMART, "Yok", "Yok (en hızlı)"}:
         return None
     if raw == COOKIE_BROWSER_AUTO:
         for browser in ("brave", "chrome", "edge", "firefox"):
             if _browser_cookie_profile_exists(browser):
                 return browser
         return None
+
     low = raw.lower()
-    return low if low in {"brave", "chrome", "edge", "firefox"} else None
+    for browser in ("brave", "chrome", "edge", "firefox"):
+        if low == browser or low.startswith(browser + " "):
+            return browser
+    return None
+
+
+def resolve_auto_cookie_browser() -> str | None:
+    """Akıllı mod gerektiğinde kullanılacak ilk mevcut tarayıcı profilini seçer."""
+    return resolve_cookie_browser_choice(COOKIE_BROWSER_AUTO)
 
 
 def stop_process_quietly(process: subprocess.Popen) -> None:
